@@ -110,10 +110,15 @@ rh_package_list()
         )
     fi
 
-    # Centos8
     if [ $MAJOR == 8 ]; then
 
         RH_LIST+=(systemd-devel)
+
+        if [ $FLAVOR != "centos" ]; then
+            RH_LIST+=(\
+            opencv \
+            )
+        fi
 
         if [ $docker == 0 ]; then
             RH_LIST+=(\
@@ -129,6 +134,7 @@ rh_package_list()
          libudev-devel \
          kernel-devel-$(uname -r) \
          kernel-headers-$(uname -r) \
+         opencv \
          openssl-static \
          protobuf-static \
         )
@@ -436,7 +442,7 @@ prep_centos8()
     if [ $? != 0 ]; then
         yum update libarchive
     else
-        yum install libarchive
+        yum install -y libarchive
     fi
 
     echo "Enabling PowerTools and AppStream repo for CentOS8 ..."
