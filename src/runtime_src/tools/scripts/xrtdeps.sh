@@ -118,6 +118,11 @@ rh_package_list()
             RH_LIST+=(\
             opencv \
             )
+        else
+            #fix cmake issue in centos 8.* 
+            RH_LIST+=(\
+            libarchive \
+            )
         fi
 
         if [ $docker == 0 ]; then
@@ -435,14 +440,6 @@ prep_centos8()
     if [ $? != 0 ]; then
        yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
 	     yum check-update
-    fi
-
-    #install latest libarchive for cmake issue in centos 8
-    rpm -q libarchive | grep -i not
-    if [ $? != 0 ]; then
-        yum update libarchive
-    else
-        yum install -y libarchive
     fi
 
     echo "Enabling PowerTools and AppStream repo for CentOS8 ..."
