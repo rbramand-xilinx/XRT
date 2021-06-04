@@ -84,7 +84,6 @@ rh_package_list()
      ocl-icd \
      ocl-icd-devel \
      opencl-headers \
-     opencv \
      openssl-devel \
      pciutils \
      perl \
@@ -428,15 +427,31 @@ prep_centos8()
     echo "Enabling EPEL repository..."
     rpm -q --quiet epel-release
     if [ $? != 0 ]; then
-    	 yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
+       yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
 	     yum check-update
     fi
-    echo "Installing cmake3 from EPEL repository..."
-    yum install -y cmake3
-    echo "Enabling PowerTools repo for CentOS8 ..."
+
+    #install latest libarchive for cmake issue in centos 8
+    rpm -q libarchive | grep -i not
+    if [ $? != 0 ]; then
+        yum update libarchive
+    else
+        yum install libarchive
+    fi
+
+    echo "Enabling PowerTools and AppStream repo for CentOS8 ..."
     yum install -y dnf-plugins-core
-    yum config-manager --set-enabled PowerTools
-    yum config-manager --set-enabled AppStream
+
+    #minor version of CentOs
+    MINOR=`cat /etc/centos-release | awk -F. '{ print $2 }'`
+    if [ $MINOR -gt "1" ]; then
+        yum config-manager --set-enabled powertools
+        yum config-manager --set-enabled appstream
+    else
+        yum config-manager --set-enabled PowerTools
+        yum config-manager --set-enabled AppStream
+    fi
+      
 }
 
 prep_centos()
