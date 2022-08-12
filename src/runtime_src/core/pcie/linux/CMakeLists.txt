@@ -3,6 +3,7 @@
 add_subdirectory(plugin/xdp)
 
 add_library(core_pcielinux_objects OBJECT
+  aie_parser.cpp
   debug.cpp
   device_linux.cpp
   scan.cpp

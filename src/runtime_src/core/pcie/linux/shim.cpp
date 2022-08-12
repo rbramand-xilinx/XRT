@@ -22,6 +22,7 @@
 #include "ert.h"
 #include "scan.h"
 #include "system_linux.h"
+#include "aie_parser.h"
 #include "xclbin.h"
 
 #include "core/include/shim_int.h"
@@ -2212,6 +2213,24 @@ register_xclbin(const xrt::xclbin&)
   throw xrt_core::ishim::not_supported_error{__func__};
 }
 
+void
+get_aie_rows_cols(xclDeviceHandle hdl, uint32_t &max_row, uint32_t &max_col)
+{
+  // hardcode aie row and col values
+  // TODO: Add data driven mechanism to get row and col values
+  static const uint32_t IPU_MAX_COLS = 5;
+  
+  max_row = 0;
+  max_col = IPU_MAX_COLS;
+}
+
+void
+get_aie_core_info(xclDeviceHandle hdl, aie_parser::XAie_Col_Status *col_status, uint32_t size, uint32_t &cols)
+{
+  // TODO: Add ioctl to get aie info
+  // Add code to fill col_status buffer
+}
+
 } // namespace xocl
 
 ////////////////////////////////////////////////////////////////
@@ -2259,7 +2278,6 @@ register_xclbin(xclDeviceHandle handle, const xrt::xclbin& xclbin)
   auto shim = get_shim_object(handle);
   shim->register_xclbin(xclbin);
 }
-
 
 } // xrt::shim_int
 ////////////////////////////////////////////////////////////////
@@ -2842,4 +2860,38 @@ xclGetDebugIpLayout(xclDeviceHandle hdl, char* buffer, size_t size, size_t* size
   if(size_ret)
     *size_ret = 0;
   return;
+}
+
+void
+aie_parser::get_aie_rows_cols(xclDeviceHandle hdl, uint32_t &max_row, uint32_t &max_col)
+{
+  // hardcode aie row and col values
+  // TODO: Add data driven mechanism to get row and col values
+  static const uint32_t IPU_MAX_COLS = 5;
+  
+  max_row = 0;
+  max_col = IPU_MAX_COLS;
+}
+
+void
+aie_parser::get_aie_core_info(xclDeviceHandle hdl, aie_parser::XAie_Col_Status *col_status, uint32_t size, uint32_t &cols)
+{
+  // TODO: Add ioctl to get aie info, we have shim hdl to call shim functions
+  // Add code to fill col_status buffer
+  
+  // Adding dummy data for verification
+  for (uint32_t col = 0; col < 5; col++)
+  {
+      for (uint32_t row = 0; row < 4; row++) {
+          col_status[col].core_tile[row].program_counter = 0x100;
+          col_status[col].core_tile[row].stack_ptr = 0x200;
+          col_status[col].core_tile[row].link_reg = 0x300;
+          col_status[col].core_tile[row].core_status = 1 << row;
+          for (int i=0;i<2;i++) {
+            col_status[col].core_tile[row].dma[i].mm2s_status = 1 << ((i*2)+1) ;
+            col_status[col].core_tile[row].dma[i].s2mm_status = 1 << ((i*2)+2);
+          }
+      }
+  }
+  cols = 5;
 }

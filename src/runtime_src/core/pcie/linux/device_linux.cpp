@@ -17,6 +17,7 @@
 
 
 #include "device_linux.h"
+#include "aie_parser.h"
 
 #include "core/common/message.h"
 #include "core/common/query_requests.h"
@@ -44,6 +45,7 @@
 #include <boost/format.hpp>
 #include <boost/tokenizer.hpp>
 #include <boost/filesystem.hpp>
+#include <boost/property_tree/json_parser.hpp>
 
 namespace {
 
@@ -733,6 +735,99 @@ struct accel_deadlock_status
   }
 };
 
+struct aie_metadata
+{
+  using result_type = query::aie_core_info::result_type;
+
+  static result_type
+  get(const xrt_core::device* dev,  key_type key)
+  {
+    // TODO: Add graphs info to aie metadata
+    // for now add all rows and columns as usable since no graph info is available
+    // this function returns string so add ptree format and convert it into string 
+    boost::property_tree::ptree pt;
+
+    boost::property_tree::ptree schema_pt;
+    schema_pt.put("major", 1);
+    schema_pt.put("minor", 0);
+    schema_pt.put("patch", 0);
+    pt.add_child("schema_version", schema_pt);
+
+    uint32_t max_col = 0, max_row = 0;
+    aie_parser::get_aie_rows_cols(dev->get_device_handle(), max_row, max_col);
+
+    boost::property_tree::ptree graph_pt;
+    graph_pt.put("id", 0);
+    graph_pt.put("name", "graph");
+
+    boost::property_tree::ptree core_cols;
+    boost::property_tree::ptree core_rows;
+    boost::property_tree::ptree mem_cols;
+    boost::property_tree::ptree mem_rows;
+    boost::property_tree::ptree mem_addr;
+    for (uint32_t col = 0; col < max_col; col++){
+      for (uint32_t row = CORE_TILE_START; row < CORE_TILE_START + NUM_CORE_TILES; row++) {
+        boost::property_tree::ptree col_pt;
+        boost::property_tree::ptree row_pt;
+
+        col_pt.put("", col);
+        row_pt.put("", row);
+
+        core_cols.push_back(std::make_pair("", col_pt));
+        core_rows.push_back(std::make_pair("", row_pt));
+        mem_cols.push_back(std::make_pair("", boost::property_tree::ptree("")));
+        mem_rows.push_back(std::make_pair("", boost::property_tree::ptree("")));
+        mem_addr.push_back(std::make_pair("", boost::property_tree::ptree("")));
+      }
+    }
+
+    graph_pt.add_child("core_columns", core_cols);
+    graph_pt.add_child("core_rows", core_rows);
+    graph_pt.add_child("iteration_memory_columns", mem_cols);
+    graph_pt.add_child("iteration_memory_rows", mem_rows);
+    graph_pt.add_child("iteration_memory_addresses", mem_addr);
+
+    boost::property_tree::ptree graphs;
+    graphs.add_child("graph0", graph_pt);
+
+    pt.add_child("aie_metadata.graphs", graphs);
+    std::ostringstream oss;
+    boost::property_tree::write_json(oss, pt);
+
+    std::string str = oss.str();
+    return str;
+  }
+
+};
+
+struct aie_core_info
+{
+  using result_type = query::aie_core_info::result_type;
+
+  static result_type
+  get(const xrt_core::device* dev,  key_type key)
+  {
+    boost::property_tree::ptree ptarray;
+    uint32_t max_col = 0, max_row = 0;
+
+    aie_parser::get_aie_rows_cols(dev->get_device_handle(), max_row, max_col);
+
+    std::vector<aie_parser::XAie_Col_Status> col_status(max_col);
+    uint32_t num_cols;
+    aie_parser::get_aie_core_info(dev->get_device_handle(), col_status.data(), 
+                    max_col * sizeof(aie_parser::XAie_Col_Status), num_cols);
+    // TODO: check num_cols with max_col and if they are not equal pass buffer
+    // with more size
+
+    ptarray = aie_parser::format_aie_info(col_status.data(), num_cols);
+    std::ostringstream oss;
+    boost::property_tree::write_json(oss, ptarray);
+
+    std::string str = oss.str();
+    return str;
+  }
+};
+
 // Specialize for other value types.
 template <typename ValueType>
 struct sysfs_fcn
@@ -1140,6 +1235,9 @@ initialize_query_table()
 
   emplace_sysfs_get<query::cu_size>                            ("", "size");
   emplace_sysfs_get<query::cu_read_range>                      ("", "read_range");
+
+  emplace_func0_request<query::aie_metadata,                   aie_metadata>();
+  emplace_func0_request<query::aie_core_info,                  aie_core_info>();
 }
 
 struct X { X() { initialize_query_table(); }};
