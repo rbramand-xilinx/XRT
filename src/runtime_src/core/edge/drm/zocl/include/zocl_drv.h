@@ -355,6 +355,8 @@ zocl_cu_submit_xcmd(struct drm_zocl_dev *zdev, int i, struct kds_command *xcmd)
 	return ops->submit(pdev, xcmd);
 }
 
+int zocl_aie_statusdump(struct drm_zocl_dev *zdev);
+
 extern u32 zocl_cu_get_status(struct platform_device *pdev);
 extern u32 zocl_scu_get_status(struct platform_device *pdev);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)

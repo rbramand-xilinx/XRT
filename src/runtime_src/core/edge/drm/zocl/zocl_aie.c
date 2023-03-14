@@ -486,6 +486,169 @@ int zocl_aie_freqscale(struct drm_zocl_dev *zdev, void *data)
 	}
 }
 
+int zocl_aie_statusdump(struct drm_zocl_dev *zdev)
+{
+	int ret = 0;
+	struct aie_tile_info tile_info;
+
+	mutex_lock(&zdev->aie_lock);
+
+	if (!zdev->aie) {
+		mutex_unlock(&zdev->aie_lock);
+		DRM_ERROR("AIE image is not loaded.\n");
+		return -ENODEV;
+	}
+
+	if (!zdev->aie->aie_dev) {
+		mutex_unlock(&zdev->aie_lock);
+		DRM_ERROR("No available AIE partition.\n");
+		return -ENODEV;
+	}
+
+	ret = aie_get_tile_info(zdev->aie->aie_dev, &tile_info);
+	if (ret) {
+		mutex_unlock(&zdev->aie_lock);
+		DRM_ERROR("getting AIE tile info failed.\n");
+		return -EFAULT;
+	}
+
+	printk(KERN_ALERT "printing aie tile info\n");
+	printk(KERN_ALERT "tile_info->cols : %lu\n", tile_info->cols);
+	printk(KERN_ALERT "tile_info->rows : %lu\n", tile_info->rows);
+	printk(KERN_ALERT " tile_info->core_rows: %u\n", tile_info->core_rows);
+	printk(KERN_ALERT " tile_info->mem_rows: %u\n", tile_info->mem_rows);
+	printk(KERN_ALERT " tile_info->shim_rows: %u\n", tile_info->shim_rows);
+	printk(KERN_ALERT " tile_info->core_row_start: %u\n", tile_info->core_row_start);
+	printk(KERN_ALERT " tile_info->mem_row_start: %u\n", tile_info->mem_row_start);
+	printk(KERN_ALERT " tile_info->shim_row_start: %u\n", tile_info->shim_row_start);
+	printk(KERN_ALERT " tile_info->core_dma_s2mm_chan: %u\n", tile_info->core_dma_s2mm_chan);
+	printk(KERN_ALERT " tile_info->shim_dma_s2mm_chan: %u\n", tile_info->shim_dma_s2mm_chan);
+	printk(KERN_ALERT " tile_info->mem_dma_s2mm_chan: %u\n", tile_info->mem_dma_s2mm_chan);
+
+	printk(KERN_ALERT " tile_info->core_locks: %u\n", tile_info->core_locks);
+	printk(KERN_ALERT " tile_info->mem_locks: %u\n", tile_info->mem_locks);
+	printk(KERN_ALERT " tile_info->shim_locks: %u\n", tile_info->shim_locks);
+	printk(KERN_ALERT " tile_info->core_events: %u\n", tile_info->core_events);
+	printk(KERN_ALERT " tile_info->mem_events: %u\n", tile_info->mem_events);
+	printk(KERN_ALERT " tile_info->shim_events: %u\n", tile_info->shim_events);
+
+	struct aie_col_status col_status[tile_info.cols];
+	for (uint32_t col = 0; col < tile_info.cols; col++) {
+#if 0
+		uint32_t count = 0;
+		// allocate large buffer
+	    void* buffer = kzalloc(sizeof(struct aie_core_tile_status) * tile_info.core_rows + sizeof(struct aie_mem_tile_status) * tile_info.mem_rows + 
+	                   sizeof(struct aie_shim_tile_status) * tile_info.shim_rows + sizeof(struct aie_dma_status) * (tile_info.core_dma_s2mm_chan + tile_info.mem_dma_s2mm_chan + tile_info.shim_dma_s2mm_chan) +
+					   sizeof(uint32_t) * (tile_info.core_events + tile_info.mem_events + tile_info.shim_events) +
+					   sizeof(uint8_t) * (tile_info.core_locks + tile_info.mem_locks + tile_info.shim_locks), GFP_KERNEL);
+
+		if (!buffer) {
+			mutex_unlock(&zdev->aie_lock);
+			DRM_ERROR("Memory allocation for getting AIE status failed.\n");
+			return -ENOMEM;
+		}
+
+		// core tile
+		col_status[col].core_tile = buffer;
+		for (uint32_t row = 0; row < tile_info.core_rows; row++) {
+			col_status[col][row].dma = buffer;
+			buffer += sizeof(struct aie_dma_status) * tile_info.core_dma_s2mm_chan;
+			col_status[col][row].event_sts = buffer;
+			buffer += 
+			col_status[col][row].lock_value = 
+		}
+
+		// mem tile
+		col_status[col].mem_tile = buffer + ;
+
+		// shim tile
+		col_status[col].shim_tile = 
+#endif
+
+#if 1
+		col_status[col].core_tile = kzalloc(sizeof(struct aie_core_tile_status) * tile_info.core_rows, GFP_KERNEL);
+		col_status[col].mem_tile = kzalloc(sizeof(struct aie_mem_tile_status) * tile_info.mem_rows, GFP_KERNEL);
+		col_status[col].shim_tile = kzalloc(sizeof(struct aie_shim_tile_status) * tile_info.shim_rows, GFP_KERNEL);
+
+		if (!col_status[col].core_tile || !col_status[col].mem_tile || !col_status[col].shim_tile) {
+			DRM_ERROR("Memory allocation failed for getting AIE status.\n");
+			return -ENOMEM;
+		}
+
+		for (uint32_t row = 0; row < tile_info.core_rows; row++) {
+			col_status[col].core_tile[row].dma = kzalloc(sizeof(struct aie_dma_status) * tile_info.core_dma_s2mm_chan, GFP_KERNEL);
+			col_status[col].core_tile[row].event_sts = kzalloc(sizeof(uint32_t) * tile_info.core_events, GFP_KERNEL);
+			col_status[col].core_tile[row].lock_value = kzalloc(sizeof(uint8_t) * tile_info.core_locks, GFP_KERNEL);
+
+			if (!col_status[col].core_tile[row].dma || col_status[col].core_tile[row].event_sts || col_status[col].core_tile[row].lock_value) {
+				DRM_ERROR("Memory allocation failed for getting AIE status.\n");
+				return -ENOMEM;
+			}
+		}
+
+		for (uint32_t row = 0; row < tile_info.mem_rows; row++) {
+			col_status[col].mem_tile[row].dma = kzalloc(sizeof(struct aie_dma_status) * tile_info.mem_dma_s2mm_chan, GFP_KERNEL);
+			col_status[col].mem_tile[row].event_sts = kzalloc(sizeof(uint32_t) * tile_info.mem_events, GFP_KERNEL);
+			col_status[col].mem_tile[row].lock_value = kzalloc(sizeof(uint8_t) * tile_info.mem_locks, GFP_KERNEL);
+
+			if (!col_status[col].mem_tile[row].dma || col_status[col].mem_tile[row].event_sts || col_status[col].mem_tile[row].lock_value) {
+				DRM_ERROR("Memory allocation failed for getting AIE status.\n");
+				return -ENOMEM;
+			}
+		}
+
+		for (uint32_t row = 0; row < tile_info.shim_rows; row++) {
+			col_status[col].shim_tile[row].dma = kzalloc(sizeof(struct aie_dma_status) * tile_info.shim_dma_s2mm_chan, GFP_KERNEL);
+			col_status[col].shim_tile[row].event_sts = kzalloc(sizeof(uint32_t) * tile_info.shim_events, GFP_KERNEL);
+			col_status[col].shim_tile[row].lock_value = kzalloc(sizeof(uint8_t) * tile_info.shim_locks, GFP_KERNEL);
+
+			if (!col_status[col].shim_tile[row].dma || col_status[col].shim_tile[row].event_sts || col_status[col].shim_tile[row].lock_value) {
+				DRM_ERROR("Memory allocation failed for getting AIE status.\n");
+				return -ENOMEM;
+			}
+		}
+#endif
+	}
+
+	ret = aie_get_status_dump(zdev->aie->aie_dev, col_status);
+	if (ret) {
+		mutex_unlock(&zdev->aie_lock);
+		DRM_ERROR("getting AIE status dump failed.\n");
+		return -EFAULT;
+	}
+
+	printk(KERN_ALERT "Printing aie status dump\n");
+
+#if 1
+	// freeing memory created earlier
+	for (uint32_t col = 0; col < tile_info.cols; col++) {
+		kfree(col_status[col].core_tile);
+		kfree(col_status[col].mem_tile);
+		kfree(col_status[col].shim_tile);
+
+		for (uint32_t row = 0; row < tile_info.core_rows; row++) {
+			kfree(col_status[col].core_tile[row].dma);
+			kfree(col_status[col].core_tile[row].event_sts);
+			kfree(col_status[col].core_tile[row].lock_value);
+		}
+
+		for (uint32_t row = 0; row < tile_info.mem_rows; row++) {
+			kfree(col_status[col].mem_tile[row].dma);
+			kfree(col_status[col].mem_tile[row].event_sts);
+			kfree(col_status[col].mem_tile[row].lock_value);
+		}
+
+		for (uint32_t row = 0; row < tile_info.shim_rows; row++) {
+			kfree(col_status[col].shim_tile[row].dma);
+			kfree(col_status[col].shim_tile[row].event_sts);
+			kfree(col_status[col].shim_tile[row].lock_value);
+		}
+	}
+#endif
+
+	return 0;
+}
+
 int
 zocl_aie_graph_alloc_context(struct drm_zocl_dev *zdev, u32 gid, u32 ctx_code,
 	struct sched_client_ctx *client)

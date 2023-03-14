@@ -416,6 +416,18 @@ static ssize_t host_mem_size_show(struct device *dev,
 }
 static DEVICE_ATTR_RO(host_mem_size);
 
+static ssize_t aie_status_dump_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int ret = 0;
+	struct drm_zocl_dev *zdev = dev_get_drvdata(dev);
+
+	ret = zocl_aie_statusdump(zdev);
+
+	return sprintf(buf, "%d\n", ret);
+}
+static DEVICE_ATTR_RO(aie_status_dump);
+
 static struct attribute *zocl_attrs[] = {
 	&dev_attr_xclbinid.attr,
 	&dev_attr_kds_numcus.attr,
@@ -431,6 +443,7 @@ static struct attribute *zocl_attrs[] = {
 	&dev_attr_dtbo_path.attr,
 	&dev_attr_host_mem_addr.attr,
 	&dev_attr_host_mem_size.attr,
+	&dev_attr_aie_status_dump.attr,
 	NULL,
 };
 
