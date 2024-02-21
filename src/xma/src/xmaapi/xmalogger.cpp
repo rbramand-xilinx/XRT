@@ -38,6 +38,7 @@
 #include "app/xmalogger.h"
 #include "lib/xmalogger.h"
 #include "core/common/config_reader.h"
+#include "core/common/message.h"
 
 #ifdef XMA_DEBUG
 #define XMA_DBG_PRINTF(format, ...) \
@@ -95,7 +96,8 @@ xma_logmsg(XmaLogLevelType level, const char *name, const char *msg, ...)
                 //Else application may exit/crash early
                 while (!g_xma_singleton->log_msg_list.empty()) {
                     auto itr1 = g_xma_singleton->log_msg_list.begin();
-                    xclLogMsg(NULL, (xrtLogMsgLevel)itr1->level, "XMA", itr1->msg.c_str());
+                    //xclLogMsg(NULL, (xrtLogMsgLevel)itr1->level, "XMA", itr1->msg.c_str());
+		    xrt_core::message::send(static_cast<xrt_core::message::severity_level>(itr1->level), "XMA", itr1->msg.c_str());
                     g_xma_singleton->log_msg_list.pop_front();
                 }
             }
@@ -103,7 +105,8 @@ xma_logmsg(XmaLogLevelType level, const char *name, const char *msg, ...)
             //Release log msg list lock
             g_xma_singleton->log_msg_list_locked = false;
         } else {
-            xclLogMsg(NULL, (xrtLogMsgLevel)level, "XMA", msg_buff);
+            //xclLogMsg(NULL, (xrtLogMsgLevel)level, "XMA", msg_buff);
+	    xrt_core::message::send(static_cast<xrt_core::message::severity_level>(level), "XMA", msg_buff);
         }
     }
 }

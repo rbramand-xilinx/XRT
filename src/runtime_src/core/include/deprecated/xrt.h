@@ -47,7 +47,7 @@
 #define XCL_DRIVER_DLLESPEC __declspec(dllimport)
 #endif
 #else
-#define XCL_DRIVER_DLLESPEC __attribute__((visibility("default")))
+#define XCL_DRIVER_DLLESPEC __attribute__((visibility("hidden")))
 #endif
 
 #ifdef __cplusplus
@@ -887,6 +887,11 @@ xclDebugReadIPStatus(xclDeviceHandle handle, enum xclDebugReadType type,
 XCL_DRIVER_DLLESPEC
 int
 xclIPSetReadRange(xclDeviceHandle handle, uint32_t ipIndex, uint32_t start, uint32_t size);
+
+#ifdef XCL_DRIVER_DLLESPEC
+#undef XCL_DRIVER_DLLESPEC
+#define XCL_DRIVER_DLLESPEC __attribute__((visibility("default")))
+#endif
 
 #ifdef __cplusplus
 }

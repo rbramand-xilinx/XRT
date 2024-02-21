@@ -28,6 +28,7 @@
 #include "lib/xmaxclbin.h"
 #include "lib/xmahw_private.h"
 #include "core/common/device.h"
+#include "core/common/system.h"
 #include <dlfcn.h>
 #include <iostream>
 #include <bitset>
@@ -48,7 +49,8 @@ int hal_probe(XmaHwCfg *hwcfg)
         return XMA_ERROR;
     }
 
-    hwcfg->num_devices = xclProbe();
+    //hwcfg->num_devices = xclProbe();
+    hwcfg->num_devices = xrt_core::get_total_devices(true).first;
     if (hwcfg->num_devices < 1) 
     {
         xma_logmsg(XMA_ERROR_LOG, XMAAPI_MOD, "ERROR: No Xilinx device found\n");
