@@ -5,18 +5,34 @@
 #include "hip/core/stream.h"
 
 namespace xrt::core::hip {
-static hipStream_t
+// In Hip, based on flags we can create default or non blocking streams.
+// If application doesn't explicitly specify stream we use default stream
+// for such operations. The default stream also has two modes legacy or per thread.
+// Legacy default stream is also called as NULL stream. Null stream waits on all explictly
+// created default streams in the same context when an operation is enqueued and explicitly
+// created default streams wait on null stream in that context.
+// Per thread stream is also default stream but is created per thread per context and waits
+// on null stream of that context.
+
+static stream_handle
 hip_stream_create_with_flags(unsigned int flags)
 {
-  throw std::runtime_error("Not implemented");
+  throw_invalid_value_if(flags != hipStreamDefault && flags != hipStreamNonBlocking,
+                         "Invalid flags passed for stream creation");
+
+  auto hip_stream = std::make_shared<stream>(get_current_context(), flags);
+  auto handle = hip_stream.get();
+  stream_cache.add(handle, std::move(hip_stream));
+  return handle;
 }
 
 static void
 hip_stream_destroy(hipStream_t stream)
 {
   throw_invalid_handle_if(!stream, "stream is nullptr");
+  throw_invalid_resource_if(stream == hipStreamPerThread, "Stream per thread can't be destroyed");
 
-  throw std::runtime_error("Not implemented");
+  stream_cache.remove(stream);
 }
 
 static void
@@ -42,7 +58,8 @@ hipStreamCreateWithFlags(hipStream_t* stream, unsigned int flags)
   try {
     throw_invalid_value_if(!stream, "stream passed is nullptr");
 
-    *stream = xrt::core::hip::hip_stream_create_with_flags(flags);
+    auto handle = xrt::core::hip::hip_stream_create_with_flags(flags);
+    *stream = reinterpret_cast<hipStream_t>(handle);
     return hipSuccess;
   }
   catch (const xrt_core::system_error& ex) {

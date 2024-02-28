@@ -5,8 +5,9 @@
 
 namespace xrt::core::hip {
 stream::
-stream(std::shared_ptr<context> ctx)
-  : m_ctx(std::move(ctx))
+stream(std::shared_ptr<context> ctx, unsigned int flags)
+  : m_ctx(std::move(ctx)),
+  : m_flags(flags)
 {}
 
 // Global map of streams
