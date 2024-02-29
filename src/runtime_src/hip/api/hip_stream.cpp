@@ -19,11 +19,11 @@ hip_stream_create_with_flags(unsigned int flags)
 {
   throw_invalid_value_if(flags != hipStreamDefault && flags != hipStreamNonBlocking,
                          "Invalid flags passed for stream creation");
+  auto hip_ctx = get_current_context();
+  throw_context_destroyed_if(!hip_ctx, "context is destroyed, no active context");
 
-  auto hip_stream = std::make_shared<stream>(get_current_context(), flags);
-  auto handle = hip_stream.get();
-  stream_cache.add(handle, std::move(hip_stream));
-  return handle;
+  std::lock_guard<std::mutex> lock(streams.mutex);
+  return insert_in_map(streams.stream_cache, std::make_shared<stream>(hip_ctx, flags));
 }
 
 static void
@@ -32,21 +32,59 @@ hip_stream_destroy(hipStream_t stream)
   throw_invalid_handle_if(!stream, "stream is nullptr");
   throw_invalid_resource_if(stream == hipStreamPerThread, "Stream per thread can't be destroyed");
 
-  stream_cache.remove(stream);
+  std::lock_guard<std::mutex> lock(streams.mutex);
+  streams.stream_cache.remove(stream);
+}
+
+static std::shared_ptr<stream>
+get_stream(hipStream_t stream)
+{
+  // lock before getting any stream
+  std::lock_guard<std::mutex> lock(streams.mutex);
+  // app dint pass stream, use legacy default stream (null stream)
+  if (!stream) {
+    auto ctx = get_current_context();
+    throw_context_destroyed_if(!ctx, "context is destroyed, no active context");
+    return ctx->get_null_stream();
+  }
+  // TODO: Add support for per thread streams
+  // if (stream == hipStreamPerThread)
+  //   return get_per_thread_stream();
+
+  return streams.stream_cache.get(stream);
 }
 
 static void
 hip_stream_synchronize(hipStream_t stream)
 {
-  throw std::runtime_error("Not implemented");
+  auto hip_stream = get_stream(stream);
+  throw_invalid_handle_if(!hip_stream, "stream is invalid");
+  hip_stream->synchronize();
+  hip_stream->await_completion();
 }
 
 static void
 hip_stream_wait_event(hipStream_t stream, hipEvent_t event, unsigned int flags)
 {
-  throw_invalid_handle_if(!event, "event is nullptr");
+  throw_invalid_handle_if(flags != 0, "flags should be 0");
 
-  throw std::runtime_error("Not implemented");
+  auto hip_wait_stream = get_stream(stream);
+  throw_invalid_resource_if(!hip_stream, "stream is invalid");
+
+  throw_invalid_handle_if(!event, "event is nullptr");
+  auto hip_event = event_cache.get(event);
+  throw_invalid_resource_if(!hip_event, "event is invalid");
+  throw_if(!hip_event->is_recorded(), hipErrorStreamCaptureIsolation, "Event passed is not recorded");
+  auto hip_event_stream = hip_event->get_stream();
+
+  if (hip_wait_stream == hip_event_stream) {
+    hip_wait_stream->record_top_event(hip_event.get());
+  }
+  else {
+    // create dumm_event with wait stream and parent as current event
+    auto dummy_event = std::make_shared<dummy_event>(hip_wait_stream, hip_event);
+    hip_wait_stream->record_top_event(dummy_event.get());
+  }
 }
 } // // xrt::core::hip
 

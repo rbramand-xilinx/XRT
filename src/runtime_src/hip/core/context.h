@@ -10,9 +10,13 @@ namespace xrt::core::hip {
 // context_handle - opaque context handle
 using context_handle = void*;
 
-class context
+// forward declaration
+class stream;
+
+class context : public std::enable_shared_from_this<context>
 {
   std::shared_ptr<device> m_device;
+  std::weak_ptr<stream> null_stream;
 
 public:
   context() = default;
@@ -30,6 +34,9 @@ public:
   {
     return m_device->get_xrt_device();
   }
+
+  std::shared_ptr<stream>
+  get_null_stream();
 };
 
 std::shared_ptr<context>

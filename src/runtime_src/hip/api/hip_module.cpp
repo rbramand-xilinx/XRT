@@ -42,6 +42,7 @@ static module_handle
 create_module(const void* image)
 {
   auto ctx = get_current_context();
+  throw_context_destroyed_if(!ctx, "context is destroyed, no active context");
   // create module and store it in module map
   return insert_in_map(module_cache, std::make_shared<module>(ctx, const_cast<void*>(image)));
 }
