@@ -7,5 +7,6 @@
 namespace xrt::core::hip {
 
 // Implementation
+xrt_core::handle_map<mem_handle, std::shared_ptr<memory>> mem_cache;
 
 } //namespace xrt::core::hip

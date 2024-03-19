@@ -5,6 +5,8 @@
 #include "core/common/error.h"
 #include "hip/config.h"
 #include "hip/core/device.h"
+#include "hip/core/context.h"
+#include "hip/core/common.h"
 #include "hip/core/memory.h"
 #include "hip/hip_runtime_api.h"
 
@@ -22,7 +24,8 @@ namespace xrt::core::hip
   static void
   hip_host_malloc(void **ptr, size_t size, unsigned int flags)
   {
-    throw std::runtime_error("Not implemented");
+    xrt::bo bo{get_current_context()->get_xrt_device(), size, flags};
+    *ptr = insert_in_map(mem_cache, std::make_shared<memory>(bo));
   }
 
   // Free memory allocated by the hipHostMalloc().
