@@ -5,7 +5,6 @@
 
 #include "core/common/api/bo.h"
 #include "core/common/device.h"
-#include "core/common/error.h"
 #include "core/common/query_requests.h"
 #include "core/common/scope_guard.h"
 #include "core/common/system.h"
@@ -51,11 +50,10 @@ send_exception_message(const std::string& msg)
 namespace xrt_xocl { namespace hal2 {
 
 device::
-device(unsigned int idx, std::string dll)
-  : m_idx(idx)
-  , m_filename{std::move(dll)}
-  , m_devinfo{}
-{}
+device(std::shared_ptr<operations> ops, unsigned int idx)
+  : m_ops(std::move(ops)), m_idx(idx), m_devinfo{}
+{
+}
 
 device::
 ~device()
@@ -200,7 +198,9 @@ get_device_info_nolock() const
   xrt_core::scope_guard<std::function<void()>> g(std::bind(at_exit, dev, dev->open_nolock()));
 
   std::memset(dinfo,0,sizeof(hal2::device_info));
-  get_core_device()->get_device_info(dinfo);
+  if (m_ops->mGetDeviceInfo(m_handle,dinfo))
+    throw std::runtime_error("device info not available");
+
   return dinfo;
 }
 
@@ -216,11 +216,7 @@ std::shared_ptr<xrt_core::device>
 device::
 get_core_device() const
 {
-  if (auto cdev = m_handle.get_handle())
-    return cdev;
-
-  // xrt::device has not been created yet
-  throw std::runtime_error("Internal Error : device has not been opened\n");
+  return m_handle.get_handle();
 }
 
 bool
@@ -235,18 +231,13 @@ void
 device::
 acquire_cu_context(const uuid& uuid,size_t cuidx,bool shared)
 {
-  try {
-    get_core_device()->open_context(uuid, cuidx, shared);
-  }
-  catch (const std::exception&) {
-    throw;
-  }
-  catch (...) {
-    throw std::runtime_error(std::string("failed to acquire CU(")
-                             + std::to_string(cuidx)
-                             + ") context '"
-                             + std::strerror(errno)
-                             + "'");
+  if (m_handle && m_ops->mOpenContext) {
+    if (m_ops->mOpenContext(m_handle,uuid.get(),cuidx,shared))
+      throw std::runtime_error(std::string("failed to acquire CU(")
+                               + std::to_string(cuidx)
+                               + ") context '"
+                               + std::strerror(errno)
+                               + "'");
   }
 }
 
@@ -254,18 +245,13 @@ void
 device::
 release_cu_context(const uuid& uuid,size_t cuidx)
 {
-  try {
-    get_core_device()->close_context(uuid, cuidx);
-  }
-  catch (const std::exception&) {
-    throw;
-  }
-  catch (...) {
-    throw std::runtime_error(std::string("failed to release CU(")
-                             + std::to_string(cuidx)
-                             + ") context '"
-                             + std::strerror(errno)
-                             + "'");
+  if (m_handle && m_ops->mCloseContext) {
+    if (m_ops->mCloseContext(m_handle,uuid.get(),cuidx))
+      throw std::runtime_error(std::string("failed to release CU(")
+                               + std::to_string(cuidx)
+                               + ") context '"
+                               + std::strerror(errno)
+                               + "'");
   }
 }
 
@@ -289,25 +275,20 @@ allocExecBuffer(size_t sz)
   auto delBufferObject = [this](execbuffer_object_handle::element_type* ebo) {
     ExecBufferObject* bo = static_cast<ExecBufferObject*>(ebo);
     XRT_DEBUG(std::cout,"deleted exec buffer object\n");
-    bo->handle->unmap(bo->data);
+    m_ops->mUnmapBO(m_handle, bo->handle, bo->data);
+    m_ops->mFreeBO(m_handle, bo->handle);
     delete bo;
   };
 
   auto ubo = std::make_unique<ExecBufferObject>();
-  try {
-    ubo->handle = get_core_device()->alloc_bo(sz, XCL_BO_FLAGS_EXECBUF);
-  }
-  catch (const std::exception&) {
-    throw;
-  }
-  catch (...) {
+  ubo->handle = m_ops->mAllocBO(m_handle,sz, 0, XCL_BO_FLAGS_EXECBUF);  // xrt_mem.h
+  if (ubo->handle == NULLBO)
     throw std::bad_alloc();
-  }
 
   ubo->size = sz;
   ubo->owner = m_handle;
-  ubo->data = ubo->handle->map(xrt_core::buffer_handle::map_type::write);
-  if (!ubo->data || ubo->data == (void*)(-1))
+  ubo->data = m_ops->mMapBO(m_handle,ubo->handle, true /* write */);
+  if (ubo->data == (void*)(-1))
     throw std::runtime_error(std::string("map failed: ") + std::strerror(errno));
   return execbuffer_object_handle(ubo.release(),delBufferObject);
 }
@@ -405,16 +386,14 @@ size_t
 device::
 read_register(size_t offset, void* buffer, size_t size)
 {
-  get_core_device()->xread(XCL_ADDR_KERNEL_CTRL, offset, buffer, size);
-  return size;
+  return m_ops->mRead(m_handle, XCL_ADDR_KERNEL_CTRL, offset, buffer, size);
 }
 
 size_t
 device::
 write_register(size_t offset, const void* buffer, size_t size)
 {
-  get_core_device()->xwrite(XCL_ADDR_KERNEL_CTRL, offset, buffer, size);
-  return size;
+  return m_ops->mWrite(m_handle, XCL_ADDR_KERNEL_CTRL, offset, buffer, size);
 }
 
 void*
@@ -462,23 +441,16 @@ device::
 exec_buf(const execbuffer_object_handle& boh)
 {
   auto bo = getExecBufferObject(boh);
-  try {
-    get_core_device()->exec_buf(bo->handle.get());
-    return 0;
-  }
-  catch (const std::exception&) {
-    throw;
-  }
-  catch (...) {
+  if (m_ops->mExecBuf(m_handle,bo->handle))
     throw std::runtime_error(std::string("failed to launch exec buffer '") + std::strerror(errno) + "'");
-  }
+  return 0;
 }
 
 int
 device::
 exec_wait(int timeout_ms) const
 {
-  auto retval = get_core_device()->exec_wait(timeout_ms);
+  auto retval = m_ops->mExecWait(m_handle,timeout_ms);
   if (retval==-1) {
     // We should not treat interrupted syscall as an error
     if (errno == EINTR)
@@ -531,10 +503,11 @@ getBufferFromFd(int fd, size_t& size, unsigned flags)
 
 void
 createDevices(hal::device_list& devices,
-              const std::string& dll, unsigned int deviceCount)
+              const std::string& dll, void* driverHandle, unsigned int deviceCount)
 {
+  auto halops = std::make_shared<operations>(dll,driverHandle,deviceCount);
   for (unsigned int idx=0; idx<deviceCount; ++idx)
-    devices.emplace_back(std::make_unique<xrt_xocl::hal2::device>(idx, dll));
+    devices.emplace_back(std::make_unique<xrt_xocl::hal2::device>(halops,idx));
 }
 
 

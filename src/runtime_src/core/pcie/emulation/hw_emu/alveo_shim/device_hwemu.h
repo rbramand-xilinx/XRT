@@ -53,12 +53,6 @@ private:
 
   std::unique_ptr<buffer_handle>
   import_bo(pid_t pid, shared_handle::export_handle ehdl) override;
-
-  void
-  get_device_info(xclDeviceInfo2 *info) override;
-
-  size_t
-  get_device_timestamp() override;
 };
 
 }} // hwemu, xrt_core

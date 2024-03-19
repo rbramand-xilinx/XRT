@@ -55,9 +55,9 @@ def reflect():
 def main(args):
     try:
         config()
-        count = pp.enumerate_devices();
+        count = xx.xclProbe()
         count = reflect()
-        pp.log_message(pp.xrt_msg_level.info, b"XRT PYTHON TEST", b"%d symbols in XRT python binding" % count)
+        xx.xclLogMsg(None, xx.xrtLogMsgLevel.XRT_INFO, b"XRT PYTHON TEST", b"%d symbols in XRT python binding", count)
         print("PASSED TEST")
         return 0
 
