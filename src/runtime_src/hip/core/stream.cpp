@@ -73,7 +73,7 @@ enqueue_event(std::shared_ptr<event>&& ev)
   {
     // iterate over commands and add them to recorded list of event
     std::lock_guard<std::mutex> lock(m_cmd_lock);
-    for (const auto& cmd : cmd_queue) {
+    for (const auto& cmd : m_cmd_queue) {
       ev->add_dependency(cmd);
     }
   }
@@ -106,6 +106,7 @@ synchronize_streams()
     }
   }
 }
+
 
 void
 stream::

@@ -2,6 +2,7 @@
 // Copyright (C) 2023 Advanced Micro Device, Inc. All rights reserved.
 
 #include <string>
+#include <cstring>
 #include "core/common/error.h"
 #include "hip/config.h"
 #include "hip/core/device.h"
@@ -24,7 +25,7 @@ namespace xrt::core::hip
   static void
   hip_host_malloc(void **ptr, size_t size, unsigned int flags)
   {
-    xrt::bo bo{get_current_context()->get_xrt_device(), size, flags};
+    xrt::bo bo{get_current_context()->get_xrt_device(), size, XRT_BO_FLAGS_HOST_ONLY, flags};
     *ptr = insert_in_map(mem_cache, std::make_shared<memory>(bo));
   }
 
@@ -60,14 +61,28 @@ namespace xrt::core::hip
   static void
   hip_host_get_device_pointer(void **devPtr, void *hstPtr, unsigned int flags)
   {
-    throw std::runtime_error("Not implemented");
+    auto hip_mem = mem_cache.get(hstPtr);
+    throw_invalid_handle_if(!hip_mem, "Invalid mem ptr");
+    auto bo = hip_mem->get_xrt_bo();
+    *devPtr = bo.map<char*>();
+    std::memset(*devPtr, bo.size(), '0');
   }
 
   // Copy data from src to dst.
   static void
   hip_memcpy(void *dst, const void *src, size_t sizeBytes, hipMemcpyKind kind)
   {
-    throw std::runtime_error("Not implemented");
+    auto hip_mem = mem_cache.get(const_cast<void*>(src));
+    throw_invalid_handle_if(!hip_mem, "Invalid mem ptr");
+
+    auto bo = hip_mem->get_xrt_bo();
+ 
+    if (kind == hipMemcpyHostToDevice) {
+      bo.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    }
+    else if (kind == hipMemcpyDeviceToHost) {
+      bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    }
   }
 
 } // xrt::core::hip

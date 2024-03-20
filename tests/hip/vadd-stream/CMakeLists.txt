@@ -7,7 +7,7 @@ set(TESTNAME "vadd-stream")
 
 include(../../CMake/utils.cmake)
 
-add_executable(${TESTNAME} main.cpp)
+add_executable(${TESTNAME} main_rahul.cpp)
 target_link_libraries(${TESTNAME} PRIVATE ${xrt_hip_LIBRARY})
 
 if (NOT WIN32)

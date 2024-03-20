@@ -41,6 +41,6 @@ endif()
 
 include_directories(${HIP_INCLUDE_DIRS})
 
-add_subdirectory(device)
-add_subdirectory(vadd)
+#add_subdirectory(device)
+#add_subdirectory(vadd)
 add_subdirectory(vadd-stream)
