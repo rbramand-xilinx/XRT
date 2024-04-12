@@ -113,6 +113,22 @@ struct ishim
   get_sysfs_path(const std::string&, const std::string&)
   { throw not_supported_error{__func__}; }
 
+  virtual std::vector<char>
+  read_aie_mem(uint16_t /*col*/, uint16_t /*row*/, uint32_t /*offset*/, uint32_t /*size*/)
+  { throw not_supported_error{__func__}; }
+
+  virtual size_t
+  write_aie_mem(uint16_t /*col*/, uint16_t /*row*/, uint32_t /*offset*/, std::vector<char>& /*data*/)
+  { throw not_supported_error{__func__}; }
+
+  virtual uint32_t
+  read_aie_reg(uint16_t /*col*/, uint16_t /*row*/, uint32_t /*reg_addr*/)
+  { throw not_supported_error{__func__}; }
+
+  virtual bool
+  write_aie_reg(uint16_t /*col*/, uint16_t /*row*/, uint32_t /*reg_addr*/, uint32_t /*reg_val*/)
+  { throw not_supported_error{__func__}; }
+
   ////////////////////////////////////////////////////////////////
   // Interfaces for buffer handling
   // Implemented explicitly by concrete shim device class
