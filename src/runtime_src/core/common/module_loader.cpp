@@ -9,6 +9,7 @@
 #include "core/common/config_reader.h"
 #include "detail/xilinx_xrt.h"
 
+#include <iostream>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -219,8 +220,12 @@ driver_plugin_paths()
 static void*
 load_library(const std::string& path)
 {
+    std::cout << "In function load library\n";
   if (auto handle = xrt_core::dlopen(path.c_str(), RTLD_NOW | RTLD_GLOBAL))
     return handle;
+
+  std::string err_msg = "Failed to open library '" + path + "'\n" + xrt_core::dlerror();
+  std::cout << err_msg << std::endl;
 
   throw std::runtime_error("Failed to open library '" + path + "'\n" + xrt_core::dlerror());
 }

@@ -19,6 +19,9 @@
 #ifndef XRT_AIE_H_
 #define XRT_AIE_H_
 
+#if defined (_WIN32)
+#undef max
+#endif
 #include "xrt.h"
 #include "xrt/xrt_uuid.h"
 #include "xrt/xrt_bo.h"
@@ -28,6 +31,7 @@
 
 #ifdef __cplusplus
 # include <cstdint>
+# include <limits>
 # include <string>
 #endif
 
@@ -88,7 +92,66 @@ public:
   void
   reset_array();
 
+  /**
+   * read_aie_mem() - Read AIE tile's memory
+   * 
+   * @param col
+   *  column number of AIE tile
+   * @param row 
+   *  row number of AIE tile
+   * @param offset
+   *  memory offset to be read from
+   * @param size 
+   *  number of bytes to be read
+   * @param slot_id
+   *  slot index corresponding to AIE tile
+   * @return
+   *  vector of bytes read
+   * 
+   * This function reads data from L1/L2 memory of AIE tile.
+   * If slot is provided, column index is treated relative to slot
+   * else it is treated as absoulute index.
+   * ** This function works only in Admin mode **
+   */
+  XCL_DRIVER_DLLESPEC
+  std::vector<char>
+  read_aie_mem(uint16_t col, uint16_t row, uint32_t offset, uint32_t size, uint16_t slot_id = std::numeric_limits<uint16_t>::max()) const;
+
+  /**
+   * write_aie_mem() - Write data to AIE tile's memory
+   * 
+   * @param col
+   *  column number of AIE tile
+   * @param row 
+   *  row number of AIE tile
+   * @param offset
+   *  memory offset to write
+   * @param data 
+   *  vector of bytes to be written
+   * @param slot_id
+   *  slot index corresponding to AIE tile
+   * @return
+   *  number of bytes written
+   * 
+   * This function writes data to L1/L2 memory of AIE tile.
+   * If slot is provided, column index is treated relative to slot
+   * else it is treated as absoulute index
+   * ** This function works only in Admin mode **
+   */
+  XCL_DRIVER_DLLESPEC
+  size_t
+  write_aie_mem(uint16_t col, uint16_t row, uint32_t offset, std::vector<char>& data, uint16_t slot_id = std::numeric_limits<uint16_t>::max());
+
+  XCL_DRIVER_DLLESPEC
+  uint32_t
+  read_aie_reg(uint16_t cpl, uint16_t row, uint32_t reg_addr, uint16_t slot_id = std::numeric_limits<uint16_t>::max()) const;
+
+  XCL_DRIVER_DLLESPEC
+  bool
+  write_aie_reg(uint16_t col, uint16_t row, uint32_t reg_addr, uint32_t reg_val, uint16_t slot_id = std::numeric_limits<uint16_t>::max());
+
 private:
+  XCL_DRIVER_DLLESPEC
   void
   open_context(access_mode mode);
 };

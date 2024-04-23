@@ -75,18 +75,21 @@ load_shim()
   // this function returns.  This is because the derived system class
   // could have constructor body that is executed after the base
   // class is constructed.
+    std::cout << "loading shim in system.cpp\n";
   static xrt_core::shim_loader shim;
 }
 
 inline system&
 instance()
 {
+    std::cout << "Inside function instance\n";
   // Multiple threads could enter here at the same time.  The first
   // thread will call the shim loader, where the singleton is set, but
   // not necessarily ready.  See comment in load_shim().
   static std::mutex mtx;
   std::lock_guard lk(mtx);
 
+  std::cout << "calling load shim\n";
   if (!singleton)
     load_shim();
 
@@ -113,15 +116,21 @@ get_userpf_device(device::id_type id)
 {
   // Construct device by calling xclOpen, the returned
   // device is cached and unmanaged
+    std::cout << "system get userpf device with index" << std::endl;
   auto device = instance().get_userpf_device(id);
+  std::cout << "calling mcdm get userpf dev with id done\n";
 
-  if (!device)
-    throw std::runtime_error("Could not open device with index '"+ std::to_string(id) + "'");
+  if (!device) {
+      std::cout << "unable to create device\n";
+      throw std::runtime_error("Could not open device with index '" + std::to_string(id) + "'");
+  }
+  std::cout << "able to create device\n";
 
   // Repackage raw ptr in new shared ptr with deleter that calls xclClose,
   // but leaves device object alone. The returned device is managed in that
   // it calls xclClose when going out of scope.
   auto close = [] (xrt_core::device* d) { d->close_device(); };
+  std::cout << "create shared ptr with close call" << std::endl;
   std::shared_ptr<xrt_core::device> ptr{device.get(), close};
 
   // The repackage raw ptr is the one that should be cached so
@@ -135,6 +144,7 @@ get_userpf_device(device::id_type id)
 std::shared_ptr<device>
 get_userpf_device(device::handle_type handle)
 {
+    std::cout << "system get userpf device with handle" << std::endl;
   // Look up core device from low level shim handle The handle is
   // inserted into map as part of calling xclOpen.  Protect against
   // multiple threads calling xclOpen at the same time, e.g. one
@@ -150,10 +160,13 @@ get_userpf_device(device::handle_type handle)
 std::shared_ptr<device>
 get_userpf_device(device::handle_type handle, device::id_type id)
 {
+    std::cout << "system get userpf device with handle and id" << std::endl;
   // Check device map cache
   if (auto device = get_userpf_device(handle)) {
-    if (device->get_device_id() != id)
-        throw std::runtime_error("get_userpf_device: id mismatch");
+      if (device->get_device_id() != id) {
+          std::cout << "id mismatch" << std::endl;
+          throw std::runtime_error("get_userpf_device: id mismatch");
+      }
     return device;
   }
 
@@ -189,6 +202,7 @@ get_bdf_info(device::id_type id, bool is_user)
 std::pair<device::id_type, device::id_type>
 get_total_devices(bool is_user)
 {
+  std::cout << "get total devices called\n";
   return instance().get_total_devices(is_user);
 }
 

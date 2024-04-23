@@ -75,6 +75,7 @@ R"(
 // Program entry
 int main( int argc, char** argv )
 {
+  std::cout << "In main of xbutil\n";
   // -- Build the supported subcommands
   SubCmdsCollection subCommands;
   const std::string executable = "xbutil";
@@ -115,6 +116,7 @@ int main( int argc, char** argv )
 
   // -- Ready to execute the code
   try {
+      std::cout << "calling _main ****\n";
     main_( argc, argv, executable, description, subCommands, configTree);
     return 0;
   } catch (const xrt_core::error& e) {

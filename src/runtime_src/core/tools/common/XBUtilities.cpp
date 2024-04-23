@@ -259,11 +259,15 @@ get_device_internal(xrt_core::device::id_type index, bool in_user_domain)
   if (in_user_domain) {
     static std::vector<std::shared_ptr<xrt_core::device>> user_devices(xrt_core::get_total_devices(true).first, nullptr);
   
+    std::cout << "user devices size : " << user_devices.size() << std::endl;
     if (user_devices.size() <= index )
       throw std::runtime_error("no device present with index " + std::to_string(index));
     
-    if (!user_devices[index])
-      user_devices[index] = xrt_core::get_userpf_device(index);
+    if (!user_devices[index]) {
+        std::cout << "calling get userpf device with index : " << index << std::endl;
+        user_devices[index] = xrt_core::get_userpf_device(index);
+    }
+    std::cout << "get dev internal with index : " << index << " done " << std::endl;
 
     return user_devices[index];
   }
@@ -338,9 +342,12 @@ XBUtilities::collect_devices( const std::set<std::string> &_deviceBDFs,
   if (_deviceBDFs.find("_all_") != _deviceBDFs.end()) {
     xrt_core::device::id_type total = 0;
     try {
+        std::cout << "collect devices called\n now calling get total devices\n";
       // If there are no devices in the server a runtime exception is thrown in  mgmt.cpp probe()
       total = (xrt_core::device::id_type) xrt_core::get_total_devices(_inUserDomain /*isUser*/).first;
-    } catch (...) {
+      std::cout << "total : " << total << std::endl;
+    } catch (std::exception &e) {
+        std::cout << "caught exception : " << e.what() << std::endl;
       /* Do nothing */
     }
 
@@ -351,13 +358,17 @@ XBUtilities::collect_devices( const std::set<std::string> &_deviceBDFs,
     // Now collect the devices and add them to the collection
     for(xrt_core::device::id_type index = 0; index < total; ++index) {
       try {
+          std::cout << "inserting in device collection : " << index << std::endl;
         _deviceCollection.push_back(get_device_internal(index, _inUserDomain));
-      } catch (...) {
+        std::cout << "insertion done\n";
+      } catch (std::exception &e) {
         /* If the device is not available, quietly ignore it
            Use case: when a device is being reset in parallel */
+          std::cout << "ex when calling get device internal : " << e.what() << std::endl;
       }
 
     }
+    std::cout << "<- " << __FUNCTION__ << std::endl;
 
     return;
   }
