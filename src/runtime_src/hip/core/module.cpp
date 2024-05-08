@@ -51,7 +51,7 @@ function(module_handle mod_hdl, std::string&& name)
     throw xrt_core::system_error(hipErrorInvalidResourceHandle, "module not available");
 
 
-  m_kernel = m_module->create_kernel(m_func_name);
+  //m_kernel = m_module->create_kernel(m_func_name);
 }
 
 // Global map of modules

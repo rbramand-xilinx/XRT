@@ -4,6 +4,8 @@
 #include "event.h"
 #include "memory.h"
 
+#include <filesystem>
+
 namespace xrt::core::hip {
 event::event()
 {
@@ -101,13 +103,21 @@ kernel_start::kernel_start(std::shared_ptr<stream> s, std::shared_ptr<function> 
   , func{std::move(f)}
 {
   ctype = type::kernel_start;
-  auto k = func->get_kernel();
+
+  // HACK : treat arg 0 as path to elf
+  std::string elf_path(static_cast<char*>(args[0]));
+  if (!std::filesystem::exists(elf_path))
+    throw std::runtime_error("arg 0 which is elf file does not exist");
+
+  xrt::elf elf{elf_path};
+  xrt::module mod{elf};
+  auto k = xrt::ext::kernel(func->get_module()->get_hw_context(), mod, func->get_function_name());
 
   // create run object and set args
   r = xrt::run(k);
 
   using karg = xrt_core::xclbin::kernel_argument;
-  int idx = 0;
+  int idx = 1; // as idx 0 is elf path
   for (const auto& arg : xrt_core::kernel_int::get_args(k)) {
     // non index args are not supported, this condition will not hit in case of HIP
     if (arg->index == karg::no_index)
@@ -128,7 +138,7 @@ kernel_start::kernel_start(std::shared_ptr<stream> s, std::shared_ptr<function> 
         // NPU device is not coherent. We need to sync the buffer objects before launching kernel
         if (hip_mem->get_type() != memory_type::device)
           hip_mem->sync(xclBOSyncDirection::XCL_BO_SYNC_BO_TO_DEVICE);
-        r.set_arg(idx, hip_mem->get_xrt_bo());
+        r.set_arg(arg->index, hip_mem->get_xrt_bo());
         break;
       }
       case karg::argtype::constant :

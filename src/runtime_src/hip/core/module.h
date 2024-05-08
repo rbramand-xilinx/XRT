@@ -5,6 +5,7 @@
 
 #include "common.h"
 #include "context.h"
+#include "experimental/xrt_ext.h"
 #include "xrt/xrt_hw_context.h"
 #include "xrt/xrt_kernel.h"
 
@@ -48,13 +49,19 @@ public:
   {
     return function_cache.get(handle);
   }
+
+  xrt::hw_context&
+  get_hw_context()
+  {
+    return m_hw_ctx;
+  }
 };
 
 class function
 {
   module* m_module;
   std::string m_func_name;
-  xrt::kernel m_kernel;
+  //xrt::ext::kernel m_kernel;
 
 public:
   function() = default;
@@ -66,10 +73,16 @@ public:
     return m_module;
   }
 
-  xrt::kernel&
-  get_kernel()
+  //xrt::ext::kernel&
+  //get_kernel()
+  //{
+   // return m_kernel;
+  //}
+
+  std::string
+  get_function_name() const
   {
-    return m_kernel;
+    return m_func_name;
   }
 };
 
