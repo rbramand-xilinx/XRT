@@ -156,6 +156,10 @@ public:
   access_mode
   get_mode() const;
 
+  XRT_API_EXPORT
+  uint32_t
+  get_context_id() const;
+
 public:
   /// @cond
   // Undocumented internal access to low level context handle

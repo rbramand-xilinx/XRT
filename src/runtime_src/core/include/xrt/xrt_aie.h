@@ -109,7 +109,7 @@ public:
    */
   XCL_DRIVER_DLLESPEC
   std::vector<char>
-  read_aie_mem(uint16_t context_id, uint16_t col, uint16_t row, uint32_t offset, uint32_t size) const;
+  read_aie_mem(uint32_t context_id, uint16_t col, uint16_t row, uint32_t offset, uint32_t size) const;
 
   /**
    * write_aie_mem() - Write data to AIE tile's memory
@@ -132,7 +132,7 @@ public:
    */
   XCL_DRIVER_DLLESPEC
   size_t
-  write_aie_mem(uint16_t context_id, uint16_t col, uint16_t row, uint32_t offset, const std::vector<char>& data);
+  write_aie_mem(uint32_t context_id, uint16_t col, uint16_t row, uint32_t offset, const std::vector<char>& data);
 
   /**
    * read_aie_reg() - Read AIE Tile's register
@@ -153,7 +153,7 @@ public:
    */
   XCL_DRIVER_DLLESPEC
   uint32_t
-  read_aie_reg(uint16_t context_id, uint16_t col, uint16_t row, uint32_t reg_addr) const;
+  read_aie_reg(uint32_t context_id, uint16_t col, uint16_t row, uint32_t reg_addr) const;
 
   /**
    * write_aie_reg() - Write AIE Tile's register
@@ -176,7 +176,7 @@ public:
    */
   XCL_DRIVER_DLLESPEC
   bool
-  write_aie_reg(uint16_t context_id, uint16_t col, uint16_t row, uint32_t reg_addr, uint32_t reg_val);
+  write_aie_reg(uint32_t context_id, uint16_t col, uint16_t row, uint32_t reg_addr, uint32_t reg_val);
 
 private:
   XCL_DRIVER_DLLESPEC

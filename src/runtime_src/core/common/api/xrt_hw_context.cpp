@@ -259,4 +259,11 @@ operator xrt_core::hwctx_handle* () const
   return get_handle()->get_hwctx_handle();
 }
 
+uint32_t
+hw_context::
+get_context_id() const
+{
+  return get_handle()->get_hwctx_handle()->get_slotidx();
+}
+
 } // xrt
