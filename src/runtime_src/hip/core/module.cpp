@@ -8,7 +8,7 @@
 
 namespace xrt::core::hip {
 void
-module::
+module_xclbin::
 create_hw_context()
 {
   auto xrt_dev = m_ctx->get_xrt_device();
@@ -16,17 +16,17 @@ create_hw_context()
   m_hw_ctx = xrt::hw_context{xrt_dev, uuid};
 }
 
-module::
-module(std::shared_ptr<context> ctx, const std::string& file_name)
-  : m_ctx{std::move(ctx)}
+module_xclbin::
+module_xclbin(std::shared_ptr<context> ctx, const std::string& file_name)
+  : module(ctx, true)
 {
   m_xclbin = xrt::xclbin{file_name};
   create_hw_context();
 }
 
-module::
-module(std::shared_ptr<context> ctx, const void* image)
-  : m_ctx{std::move(ctx)}
+module_xclbin::
+module_xclbin(std::shared_ptr<context> ctx, const void* image)
+  : module(ctx, true)
 {
   // we trust pointer sent by application and treat
   // it as xclbin data. Application can crash/seg fault
@@ -36,7 +36,7 @@ module(std::shared_ptr<context> ctx, const void* image)
 }
 
 xrt::kernel
-module::
+module_xclbin::
 create_kernel(std::string& name)
 {
   return xrt::kernel{m_hw_ctx, name};
@@ -50,8 +50,7 @@ function(module_handle mod_hdl, std::string&& name)
   if (!module_cache.count(mod_hdl))
     throw xrt_core::system_error(hipErrorInvalidResourceHandle, "module not available");
 
-
-  //m_kernel = m_module->create_kernel(m_func_name);
+  m_kernel = m_module->create_kernel(m_func_name);
 }
 
 // Global map of modules

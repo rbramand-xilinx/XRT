@@ -23,14 +23,30 @@ class function;
 class module
 {
   std::shared_ptr<context> m_ctx;
+  bool m_xclbin_type;
+
+public:
+  module(std::shared_ptr<context> ctx, bool xclbin_type)
+    : m_ctx{std::move(ctx)}
+    , m_xclbin_type{xclbin_type}
+  {}
+
+  bool
+  is_xclbin_module() const
+  {
+    return m_xclbin_type;
+  }
+};
+
+class module_xclbin : public module
+{
   xrt::xclbin m_xclbin;
   xrt::hw_context m_hw_ctx;
   xrt_core::handle_map<function_handle, std::shared_ptr<function>> function_cache;
 
 public:
-  module() = default;
-  module(std::shared_ptr<context> ctx, const std::string& file_name);
-  module(std::shared_ptr<context> ctx, const void* image);
+  module_xclbin(std::shared_ptr<context> ctx, const std::string& file_name);
+  module_xclbin(std::shared_ptr<context> ctx, const void* image);
 
   void
   create_hw_context();
@@ -56,6 +72,9 @@ public:
     return m_hw_ctx;
   }
 };
+
+class module_xclbin : public module
+{}
 
 class function
 {

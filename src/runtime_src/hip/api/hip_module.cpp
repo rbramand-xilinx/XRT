@@ -56,7 +56,7 @@ create_module(T&& t)
   auto ctx = get_current_context();
   throw_context_destroyed_if(!ctx, "context is destroyed, no active context");
   // create module and store it in module map
-  return insert_in_map(module_cache, std::make_shared<module>(ctx, std::forward<T>(t)));
+  return insert_in_map(module_cache, std::make_shared<module_xclbin>(ctx, std::forward<T>(t)));
 }
 
 static module_handle
