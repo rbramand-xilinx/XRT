@@ -4,6 +4,8 @@
 #include "event.h"
 #include "memory.h"
 
+#include <filesystem>
+
 namespace xrt::core::hip {
 event::event()
 {
@@ -96,19 +98,29 @@ void event::add_dependency(std::shared_ptr<command> cmd)
   m_recorded_commands.push_back(std::move(cmd));
 }
 
-kernel_start::kernel_start(std::shared_ptr<stream> s, std::shared_ptr<function> f, void** args)
+kernel_start::kernel_start(std::shared_ptr<stream> s, std::shared_ptr<function> f, void** args, void** extra_args)
   : command(std::move(s))
   , func{std::move(f)}
 {
   ctype = type::kernel_start;
-  auto k = func->get_kernel();
 
-  // create run object and set args
-  r = xrt::run(k);
+  // extra_args is used to pass module handle returned by loading elf file using hipModuleLoad
+  module_handle hdl = extra_args[0];
+  auto hip_mod = module_cache.get(hdl);
+  throw_invalid_resource_if(!hip_mod, "module not available");
+  // check if elf module handle is passed
+  throw_invalid_resource_if(hip_mod->is_xclbin_module(), "invalid module handle passed");
+
+  auto hip_elf_mod = std::dynamic_pointer_cast<module_elf>(hip_mod);
+  throw_invalid_resource_if(!hip_elf_mod, "getting hip module using dynamic pointer cast failed");
+
+  // create run object using module and set args
+  auto kernel = func->get_kernel();
+  r = xrt::run(func->get_kernel(), hip_elf_mod->get_xrt_module());
 
   using karg = xrt_core::xclbin::kernel_argument;
   int idx = 0;
-  for (const auto& arg : xrt_core::kernel_int::get_args(k)) {
+  for (const auto& arg : xrt_core::kernel_int::get_args(kernel)) {
     // non index args are not supported, this condition will not hit in case of HIP
     if (arg->index == karg::no_index)
       throw std::runtime_error("function has invalid argument");
@@ -128,7 +140,7 @@ kernel_start::kernel_start(std::shared_ptr<stream> s, std::shared_ptr<function> 
         // NPU device is not coherent. We need to sync the buffer objects before launching kernel
         if (hip_mem->get_type() != memory_type::device)
           hip_mem->sync(xclBOSyncDirection::XCL_BO_SYNC_BO_TO_DEVICE);
-        r.set_arg(idx, hip_mem->get_xrt_bo());
+        r.set_arg(arg->index, hip_mem->get_xrt_bo());
         break;
       }
       case karg::argtype::constant :

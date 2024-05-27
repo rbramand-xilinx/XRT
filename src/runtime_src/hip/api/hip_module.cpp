@@ -11,15 +11,18 @@ static void
 hip_module_launch_kernel(hipFunction_t f, uint32_t /*gridDimX*/, uint32_t /*gridDimY*/,
                          uint32_t /*gridDimZ*/, uint32_t /*blockDimX*/, uint32_t /*blockDimY*/,
                          uint32_t /*blockDimZ*/, uint32_t sharedMemBytes, hipStream_t hStream,
-                         void** kernelParams, void** /*extra*/)
+                         void** kernelParams, void** extra)
 {
   throw_invalid_resource_if(!f, "function is nullptr");
 
   auto func_hdl = reinterpret_cast<function_handle>(f);
   auto hip_mod = module_cache.get(static_cast<function*>(func_hdl)->get_module());
   throw_invalid_resource_if(!hip_mod, "module associated with function is unloaded");
+  throw_invalid_resource_if(!hip_mod->is_xclbin_module(), "invalid module handle passed");
 
-  auto hip_func = hip_mod->get_function(func_hdl);
+  auto hip_xclbin_mod = std::dynamic_pointer_cast<module_xclbin>(hip_mod);
+  throw_invalid_resource_if(!hip_xclbin_mod, "getting hip module using dynamic pointer cast failed");
+  auto hip_func = hip_xclbin_mod->get_function(func_hdl);
   throw_invalid_resource_if(!hip_func, "invalid function passed");
 
   // All the RyzenAI kernels run only once, so ignoring grid and block dimensions
@@ -27,10 +30,13 @@ hip_module_launch_kernel(hipFunction_t f, uint32_t /*gridDimX*/, uint32_t /*grid
 
   auto hip_stream = get_stream(hStream);
   auto s_hdl = hip_stream.get();
+  // Here extra arg is used to pass module handle returned by loading elf file
+  // in previous hipModuleLoad call
   auto cmd_hdl = insert_in_map(command_cache,
                                std::make_shared<kernel_start>(hip_stream,
                                                               hip_func,
-                                                              kernelParams));
+                                                              kernelParams,
+                                                              extra));
   s_hdl->enqueue(command_cache.get(cmd_hdl));
 }
 
@@ -44,9 +50,12 @@ hip_module_get_function(hipModule_t hmod, const char* name)
   auto mod_hdl = reinterpret_cast<module_handle>(hmod);
   auto hip_mod = module_cache.get(mod_hdl);
   throw_invalid_resource_if(!hip_mod, "module not available");
+  throw_invalid_resource_if(!hip_mod->is_xclbin_module(), "invalid module handle passed");
 
+  auto hip_xclbin_mod = std::dynamic_pointer_cast<module_xclbin>(hip_mod);
+  throw_invalid_resource_if(!hip_xclbin_mod, "getting hip module using dynamic pointer cast failed");
   // create function obj and store in map maintained by module
-  return hip_mod->add_function(std::make_shared<function>(mod_hdl, std::string(name)));
+  return hip_xclbin_mod->add_function(std::make_shared<function>(hip_xclbin_mod.get(), std::string(name)));
 }
 
 template <typename T>
@@ -55,8 +64,24 @@ create_module(T&& t)
 {
   auto ctx = get_current_context();
   throw_context_destroyed_if(!ctx, "context is destroyed, no active context");
+
   // create module and store it in module map
-  return insert_in_map(module_cache, std::make_shared<module>(ctx, std::forward<T>(t)));
+  // module load can be called with xclbin or with elf
+  std::shared_ptr<module> mod;
+  try {
+    // try creating xclbin module
+    mod = std::make_shared<module_xclbin>(ctx, std::forward<T>(t));
+  }
+  catch (...) {
+    // fallback to elf module creation
+    try {
+      mod = std::make_shared<module_elf>(ctx, std::forward<T>(t));
+    }
+    catch (...) {
+      throw;
+    }
+  }
+  return insert_in_map(module_cache, mod);
 }
 
 static module_handle

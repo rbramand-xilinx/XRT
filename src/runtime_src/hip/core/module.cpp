@@ -8,25 +8,25 @@
 
 namespace xrt::core::hip {
 void
-module::
+module_xclbin::
 create_hw_context()
 {
-  auto xrt_dev = m_ctx->get_xrt_device();
+  auto xrt_dev = get_context()->get_xrt_device();
   auto uuid = xrt_dev.register_xclbin(m_xclbin);
   m_hw_ctx = xrt::hw_context{xrt_dev, uuid};
 }
 
-module::
-module(std::shared_ptr<context> ctx, const std::string& file_name)
-  : m_ctx{std::move(ctx)}
+module_xclbin::
+module_xclbin(std::shared_ptr<context> ctx, const std::string& file_name)
+  : module(ctx, true)
 {
   m_xclbin = xrt::xclbin{file_name};
   create_hw_context();
 }
 
-module::
-module(std::shared_ptr<context> ctx, const void* image)
-  : m_ctx{std::move(ctx)}
+module_xclbin::
+module_xclbin(std::shared_ptr<context> ctx, const void* image)
+  : module(ctx, true)
 {
   // we trust pointer sent by application and treat
   // it as xclbin data. Application can crash/seg fault
@@ -36,20 +36,34 @@ module(std::shared_ptr<context> ctx, const void* image)
 }
 
 xrt::kernel
-module::
+module_xclbin::
 create_kernel(std::string& name)
 {
   return xrt::kernel{m_hw_ctx, name};
 }
 
+module_elf::
+module_elf(std::shared_ptr<context> ctx, const std::string& file_name)
+  : module(ctx, false)
+{
+  m_elf = xrt::elf(file_name);
+  m_module = xrt::module(m_elf);
+}
+
+module_elf::
+module_elf(std::shared_ptr<context> ctx, const void* image)
+  : module(ctx, false)
+{
+  throw std::runtime_error("module construction not supported");
+}
+
 function::
-function(module_handle mod_hdl, std::string&& name)
-  : m_module{static_cast<module*>(mod_hdl)}
+function(module_xclbin* mod_hdl, std::string&& name)
+  : m_module{mod_hdl}
   , m_func_name{std::move(name)}
 {
   if (!module_cache.count(mod_hdl))
     throw xrt_core::system_error(hipErrorInvalidResourceHandle, "module not available");
-
 
   m_kernel = m_module->create_kernel(m_func_name);
 }
