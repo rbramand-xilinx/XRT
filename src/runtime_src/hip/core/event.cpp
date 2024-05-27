@@ -98,26 +98,29 @@ void event::add_dependency(std::shared_ptr<command> cmd)
   m_recorded_commands.push_back(std::move(cmd));
 }
 
-kernel_start::kernel_start(std::shared_ptr<stream> s, std::shared_ptr<function> f, void** args)
+kernel_start::kernel_start(std::shared_ptr<stream> s, std::shared_ptr<function> f, void** args, void** extra_args)
   : command(std::move(s))
   , func{std::move(f)}
 {
   ctype = type::kernel_start;
 
-  // HACK : treat arg 0 as path to elf
-  std::string elf_path(static_cast<char*>(args[0]));
-  if (!std::filesystem::exists(elf_path))
-    throw std::runtime_error("arg 0 which is elf file does not exist");
+  // extra_args is used to pass module handle returned by loading elf file using hipModuleLoad
+  module_handle hdl = extra_args[0];
+  auto hip_mod = module_cache.get(hdl);
+  throw_invalid_resource_if(!hip_mod, "module not available");
+  // check if elf module handle is passed
+  throw_invalid_resource_if(hip_mod->is_xclbin_module(), "invalid module handle passed");
 
-  xrt::elf elf{elf_path};
-  xrt::module mod{elf};
-  auto k = xrt::ext::kernel(func->get_module()->get_hw_context(), mod, func->get_function_name());
+  auto hip_elf_mod = std::dynamic_pointer_cast<module_elf>(hip_mod);
+  throw_invalid_resource_if(!hip_elf_mod, "getting hip module using dynamic pointer cast failed");
 
+  // TODO: don't create kernel here, create run object with kernel already created and module fetched above
+  auto k = xrt::ext::kernel(func->get_module()->get_hw_context(), hip_elf_mod->get_xrt_module(), func->get_function_name());
   // create run object and set args
   r = xrt::run(k);
 
   using karg = xrt_core::xclbin::kernel_argument;
-  int idx = 1; // as idx 0 is elf path
+  int idx = 0;
   for (const auto& arg : xrt_core::kernel_int::get_args(k)) {
     // non index args are not supported, this condition will not hit in case of HIP
     if (arg->index == karg::no_index)

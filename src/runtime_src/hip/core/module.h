@@ -36,6 +36,15 @@ public:
   {
     return m_xclbin_type;
   }
+
+  std::shared_ptr<context>
+  get_context() const
+  {
+    return m_ctx;
+  }
+
+  virtual
+  ~module() = default;
 };
 
 class module_xclbin : public module
@@ -73,30 +82,40 @@ public:
   }
 };
 
-class module_xclbin : public module
-{}
+class module_elf : public module
+{
+  xrt::elf m_elf;
+  xrt::module m_module;
+
+public:
+  module_elf(std::shared_ptr<context> ctx, const std::string& file_name);
+  module_elf(std::shared_ptr<context> ctx, const void* image);
+
+  const xrt::module&
+  get_xrt_module() const { return m_module; }
+};
 
 class function
 {
-  module* m_module;
+  module_xclbin* m_module;
   std::string m_func_name;
-  //xrt::ext::kernel m_kernel;
+  xrt::kernel m_kernel;
 
 public:
   function() = default;
-  function(module_handle mod_hdl, std::string&& name);
+  function(module_xclbin* mod_hdl, std::string&& name);
 
-  module*
+  module_xclbin*
   get_module() const
   {
     return m_module;
   }
 
-  //xrt::ext::kernel&
-  //get_kernel()
-  //{
-   // return m_kernel;
-  //}
+  xrt::kernel&
+  get_kernel()
+  {
+    return m_kernel;
+  }
 
   std::string
   get_function_name() const
