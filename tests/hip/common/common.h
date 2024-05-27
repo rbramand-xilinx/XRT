@@ -212,6 +212,21 @@ public:
     test_hip_check(hipModuleGetFunction(&hfunction, hmodule, funcName), funcName);
     return hfunction;
   }
+
+  hipModule_t
+  load_elf(const char* fileName)
+  {
+    auto it = mModuleTable.find(fileName);
+    hipModule_t hmodule = nullptr;
+    if (it == mModuleTable.end()) {
+      test_hip_check(hipModuleLoad(&hmodule, fileName), fileName);
+      mModuleTable.insert(it, std::pair<std::string, hipModule_t>(fileName, hmodule));
+    }
+    else {
+      hmodule = it->second;
+    }
+    return hmodule;
+  }
 };
 
 }

@@ -114,14 +114,13 @@ kernel_start::kernel_start(std::shared_ptr<stream> s, std::shared_ptr<function> 
   auto hip_elf_mod = std::dynamic_pointer_cast<module_elf>(hip_mod);
   throw_invalid_resource_if(!hip_elf_mod, "getting hip module using dynamic pointer cast failed");
 
-  // TODO: don't create kernel here, create run object with kernel already created and module fetched above
-  auto k = xrt::ext::kernel(func->get_module()->get_hw_context(), hip_elf_mod->get_xrt_module(), func->get_function_name());
-  // create run object and set args
-  r = xrt::run(k);
+  // create run object using module and set args
+  auto kernel = func->get_kernel();
+  r = xrt::run(func->get_kernel(), hip_elf_mod->get_xrt_module());
 
   using karg = xrt_core::xclbin::kernel_argument;
   int idx = 0;
-  for (const auto& arg : xrt_core::kernel_int::get_args(k)) {
+  for (const auto& arg : xrt_core::kernel_int::get_args(kernel)) {
     // non index args are not supported, this condition will not hit in case of HIP
     if (arg->index == karg::no_index)
       throw std::runtime_error("function has invalid argument");

@@ -17,6 +17,7 @@
 # include "experimental/xrt_exception.h"
 # include "experimental/xrt_fence.h"
 # include "experimental/xrt_hw_context.h"
+# include "experimental/xrt_module.h"
 # include <chrono>
 # include <condition_variable>
 # include <cstdint>
@@ -138,6 +139,15 @@ public:
   XCL_DRIVER_DLLESPEC
   explicit
   run(const kernel& krnl);
+
+  /**
+   * run() - Construct run object from a kernel, module objects
+   *
+   * @param krnl: Kernel object representing the kernel to execute
+   * @param module: Module object representing the module to be loaded
+   */
+  XCL_DRIVER_DLLESPEC
+  run(const kernel& krnl, const module& module);
 
   /**
    * start() - Start one execution of a run.

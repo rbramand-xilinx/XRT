@@ -2148,6 +2148,21 @@ public:
     XRT_DEBUGF("run_impl::run_impl(%d)\n" , uid);
   }
 
+  run_impl(std::shared_ptr<kernel_impl> k, const module& module)
+    : kernel(std::move(k))
+    , m_module{copy_module(module, kernel->get_hw_context())}
+    , m_hwqueue(kernel->get_hw_queue())
+    , ips(kernel->get_ips())
+    , cumask(kernel->get_cumask())
+    , core_device(kernel->get_core_device())
+    , cmd(std::make_shared<kernel_command>(kernel->get_device(), m_hwqueue, kernel->get_hw_context()))
+    , data(initialize_command(cmd.get()))
+    , m_header(0)
+    , uid(create_uid())
+  {
+    XRT_DEBUGF("run_impl::run_impl(%d)\n" , uid);
+  }
+
   // Clones a run impl, so that the clone can be executed concurrently
   // with the clonee.
   explicit
@@ -2695,6 +2710,16 @@ public:
   explicit
   mailbox_impl(const std::shared_ptr<kernel_impl>& k)
     : run_impl(k)
+  {
+    if (cumask.count() > 1)
+      throw xrt_core::error(std::errc::value_too_large, "Only one compute unit allowed with mailbox");
+    auto mtype = k->get_mailbox_type();
+    m_readonly = (mtype == mailbox_type::out);
+    m_writeonly = (mtype == mailbox_type::in);
+  }
+
+  mailbox_impl(const std::shared_ptr<kernel_impl>& k, const module& module)
+    : run_impl(k, module)
   {
     if (cumask.count() > 1)
       throw xrt_core::error(std::errc::value_too_large, "Only one compute unit allowed with mailbox");
@@ -3373,6 +3398,14 @@ alloc_run(const std::shared_ptr<xrt::kernel_impl>& khdl)
     : std::make_unique<xrt::run_impl>(khdl);
 }
 
+static std::unique_ptr<xrt::run_impl>
+alloc_run_module(const std::shared_ptr<xrt::kernel_impl>& khdl, const xrt::module& module)
+{
+  return khdl->has_mailbox()
+    ? std::make_unique<xrt::mailbox_impl>(khdl, module)
+    : std::make_unique<xrt::run_impl>(khdl, module);
+}
+
 static std::shared_ptr<xrt::kernel_impl>
 alloc_kernel(const std::shared_ptr<device_type>& dev,
 	     const xrt::uuid& xclbin_id,
@@ -3634,6 +3667,12 @@ run::
 run(const kernel& krnl)
   : handle(xdp::native::profiling_wrapper
            ("xrt::run::run",alloc_run, krnl.get_handle()))
+{}
+
+run::
+run(const kernel& krnl, const module& module)
+  : handle(xdp::native::profiling_wrapper
+           ("xrt::run::run", alloc_run_module, krnl.get_handle(), module))
 {}
 
 void
