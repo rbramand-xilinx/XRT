@@ -5,6 +5,7 @@ add_library(hip_api_library_objects OBJECT
   hip_device.cpp
   hip_event.cpp
   hip_error.cpp
+  hip_graph.cpp
   hip_memory.cpp
   hip_module.cpp
   hip_stream.cpp
