@@ -1,0 +1,39 @@
+{
+    "ctrlcode" : {
+        "config_uuid" : "2a0829b8-9721-48ad-b6de-680791f8bf4b"
+    },
+    "config": {
+         "profile_uuid": "c5a915c8-ac29-4f92-af19-f15b0aa68122",
+         "uuid": "2a0829b8-9721-48ad-b6de-680791f8bf4b",
+         "kernel": {
+              "name" : "viml",
+              "signature" : "_Z4vimlPvS_S_S_S_"
+         },
+         "pdi": [
+              {
+                  "name" : "pdi0",
+                  "file" : "/home/choudhar/backup/choudhar/work/AIEBU/note/05_08_2024/xclbin2elf/elf_txn_no_cp_stx/00000000-0000-0000-0000-000000001111.pdi"
+              }
+         ]
+    },
+    "external_buffers": {
+        "buffer0": {
+            "xrt_id": 0,
+            "logical_id": 0,
+            "size_in_bytes": 1536,
+            "name": "g_compute_graph.ifm_ddr"
+        },
+        "buffer1": {
+            "xrt_id": 1,
+            "logical_id": 1,
+            "size_in_bytes": 245760,
+            "name": "g_compute_graph.wts_ddr"
+        },
+        "buffer2": {
+            "xrt_id": 2,
+            "logical_id": 2,
+            "size_in_bytes": 320,
+            "name": "g_compute_graph.ofm_ddr"
+        }
+    }
+}

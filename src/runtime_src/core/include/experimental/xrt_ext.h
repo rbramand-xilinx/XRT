@@ -254,6 +254,9 @@ public:
    */
   XRT_API_EXPORT
   kernel(const xrt::hw_context& ctx, const xrt::module& mod, const std::string& name);
+
+  XRT_API_EXPORT
+  kernel(const xrt::hw_context& ctx, const std::string& name);
 };
 
 } // xrt::ext
