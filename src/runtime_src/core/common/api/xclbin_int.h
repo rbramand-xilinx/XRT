@@ -7,6 +7,7 @@
 
 // This file defines implementation extensions to the XRT XCLBIN APIs.
 #include "core/include/experimental/xrt_xclbin.h"
+#include "core/include/xrt/xrt_hw_context.h"
 
 #include "core/common/config.h"
 #include "core/common/xclbin_parser.h"
@@ -19,6 +20,9 @@
 // to end users via xrt::xclbin.   These functions are used by
 // XRT core implementation.
 namespace xrt_core { namespace xclbin_int {
+
+std::shared_ptr<xrt::xclbin::kernel_impl>
+init_kernel_from_elf(xrt::hw_context::temp_elf_type& elf_param);
 
 // get_axlf() - Retrieve complete axlf from handle
 const axlf*

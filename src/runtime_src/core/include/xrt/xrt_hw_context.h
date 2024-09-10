@@ -53,6 +53,8 @@ public:
   using cfg_param_type = std::map<std::string, uint32_t>;
   using qos_type = cfg_param_type; //alias to old type
 
+  using temp_elf_type = std::map<std::string, std::string>;
+
   /**
    * @enum access_mode - legacy access mode
    *
@@ -104,6 +106,9 @@ public:
    */
   XRT_API_EXPORT
   hw_context(const xrt::device& device, const xrt::uuid& xclbin_id, access_mode mode);
+
+  XRT_API_EXPORT
+  hw_context(const xrt::device& device, const temp_elf_type& elf);
 
   ///@cond
   // Undocumented construction w/o specifying qos

@@ -4,6 +4,7 @@
 #define XRT_API_SOURCE         // exporting xrt_module.h
 #define XRT_CORE_COMMON_SOURCE // in same dll as core_common
 #include "core/common/config_reader.h"
+#include "core/common/message.h"
 #include "experimental/xrt_module.h"
 #include "experimental/xrt_elf.h"
 #include "experimental/xrt_ext.h"
@@ -28,6 +29,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <sstream>
 
 #ifndef AIE_COLUMN_PAGE_SIZE
 # define AIE_COLUMN_PAGE_SIZE 8192  // NOLINT
@@ -43,10 +45,9 @@ static constexpr size_t column_page_size = AIE_COLUMN_PAGE_SIZE;
 static constexpr uint8_t Elf_Amd_Aie2p  = 69;
 static constexpr uint8_t Elf_Amd_Aie2ps = 64;
 
-// When Debug.dump_bo_from_elf is true in xrt.ini, instruction bo(s) from elf will be dumped
-static const char* Debug_Bo_From_Elf_Feature = "Debug.dump_bo_from_elf";
 static const char* Scratch_Pad_Mem_Symbol = "scratch-pad-mem";
 static const char* Control_Packet_Symbol = "control-packet";
+static const char* pdi_symbol = "pdi0";
 
 struct buf
 {
@@ -114,6 +115,7 @@ struct patcher
     scalar_32bit_kind = 3,
     control_packet_48 = 4,              // patching scheme needed by firmware to patch control packet
     shim_dma_48 = 5,                    // patching scheme needed by firmware to patch instruction buffer
+    address_64 = 6,                     // patch pdi addres
     unknown_symbol_kind = 8
   };
 
@@ -122,7 +124,8 @@ struct patcher
     ctrldata = 1,       // control packet
     preempt_save = 2,   // preempt_save
     preempt_restore = 3, // preempt_restore
-    buf_type_count = 4   // total number of buf types
+    pdi = 4, // pdi
+    buf_type_count = 5   // total number of buf types
   };
 
   inline static const char*
@@ -131,7 +134,8 @@ struct patcher
     static const char* Section_Name_Array[static_cast<int>(buf_type::buf_type_count)] = { ".ctrltext",
                                                                                           ".ctrldata",
                                                                                           ".preempt_save",
-                                                                                          ".preempt_restore" };
+                                                                                          ".preempt_restore",
+                                                                                          "pdi0"};
 
     return Section_Name_Array[static_cast<int>(bt)];
   }
@@ -153,9 +157,16 @@ struct patcher
     , m_ctrlcode_patchinfo(std::move(ctrlcode_offset))
   {}
 
+  void
+  patch_64bitaddr(uint32_t* data_to_patch, uint64_t addr)
+  {
+    *data_to_patch = static_cast<uint32_t>(addr & 0xffffffff);
+    *(data_to_patch + 1) = static_cast<uint32_t>((addr >> 32) & 0xffffffff);
+  }
+  
 // Replace certain bits of *data_to_patch with register_value. Which bits to be replaced is specified by mask
-// For     *data_to_patch be 0xbb11aaaa and mask be 0x00ff0000
-// To make *data_to_patch be 0xbb55aaaa, register_value must be 0x00550000
+  // For     *data_to_patch be 0xbb11aaaa and mask be 0x00ff0000
+  // To make *data_to_patch be 0xbb55aaaa, register_value must be 0x00550000
   void
   patch32(uint32_t* data_to_patch, uint64_t register_value, uint32_t mask)
   {
@@ -216,6 +227,10 @@ struct patcher
     for (auto item : m_ctrlcode_patchinfo) {
       auto bd_data_ptr = reinterpret_cast<uint32_t*>(base + item.offset_to_patch_buffer);
       switch (m_symbol_type) {
+      case symbol_type::address_64:
+          // new_value is a 64bit address
+          patch_64bitaddr(bd_data_ptr, new_value);
+        break;
       case symbol_type::scalar_32bit_kind:
         // new_value is a register value
         if (item.mask)
@@ -243,9 +258,6 @@ struct patcher
   XRT_CORE_UNUSED void
   dump_bo(xrt::bo& bo, const std::string& filename)
   {
-    if (!xrt_core::config::get_feature_toggle(Debug_Bo_From_Elf_Feature))
-      return;
-
     std::ofstream ofs(filename, std::ios::out | std::ios::binary);
     if (!ofs.is_open())
       throw std::runtime_error("Failure opening file " + filename + " for writing!");
@@ -270,7 +282,6 @@ namespace xrt
 class module_impl
 {
   xrt::uuid m_cfg_uuid;   // matching hw configuration id
-
 public:
   explicit module_impl(xrt::uuid cfg_uuid)
     : m_cfg_uuid(std::move(cfg_uuid))
@@ -317,6 +328,12 @@ public:
 
   [[nodiscard]] virtual const buf&
       get_preempt_restore() const
+  {
+      throw std::runtime_error("Not supported");
+  }
+
+  [[nodiscard]] virtual const buf&
+      get_pdi() const
   {
       throw std::runtime_error("Not supported");
   }
@@ -465,6 +482,8 @@ class module_elf : public module_impl
   bool m_save_buf_exist = false;
   buf m_restore_buf;
   bool m_restore_buf_exist = false;
+  buf m_pdi_buf;
+  bool m_pdi_buf_exist = false;
   size_t m_scratch_pad_mem_size = 0;
 
   // The ELF sections embed column and page information in their
@@ -551,6 +570,22 @@ class module_elf : public module_impl
     return false;
   }
 
+  // Extract pdi from ELF sections
+  // return true if section exist
+  bool initialize_pdi_buf(const ELFIO::elfio& elf, buf& pdi_buf)
+  {
+    for (const auto& sec : elf.sections) {
+      auto name = sec->get_name();
+      if (name.find(patcher::section_name_to_string(patcher::buf_type::pdi)) == std::string::npos)
+        continue;
+
+      pdi_buf.append_section_data(sec.get());
+      return true;
+    }
+
+    return false;
+  }
+
   // Extract control code from ELF sections without assuming anything
   // about order of sections in the ELF file.  Build helper data
   // structures that manages the control code data for each column and
@@ -631,6 +666,9 @@ class module_elf : public module_impl
 
    else if (m_restore_buf_exist && (section_name == patcher::section_name_to_string(patcher::buf_type::preempt_restore)))
      return { m_restore_buf.size(), patcher::buf_type::preempt_restore };
+
+   else if (m_pdi_buf_exist && (section_name == patcher::section_name_to_string(patcher::buf_type::pdi)))
+     return { m_pdi_buf.size(), patcher::buf_type::pdi };
 
    else
      throw std::runtime_error("Invalid section name " + section_name);
@@ -784,6 +822,18 @@ class module_elf : public module_impl
     }
 
     it->second.patch(base, patch);
+    if (xrt_core::config::get_app_debug()) {
+      if (not_found_use_argument_name) {
+        std::stringstream ss;
+        ss << "Patched " << patcher::section_name_to_string(type) << "use agrument index " << index << "with value " << std::hex << patch;
+        xrt_core::message::send( xrt_core::message::severity_level::debug, "xrt_module", ss.str());
+      }
+      else {
+        std::stringstream ss;
+        ss << "Patched " << patcher::section_name_to_string(type) << "use agrument name " << argnm << "with value " << std::hex << patch;
+        xrt_core::message::send( xrt_core::message::severity_level::debug, "xrt_module", ss.str());
+      }
+    }
     return true;
   }
 
@@ -827,6 +877,8 @@ public:
       if (m_save_buf_exist != m_restore_buf_exist)
         throw std::runtime_error{ "Invalid elf because preempt save and restore is not paired" };
 
+      m_pdi_buf_exist = initialize_pdi_buf(xrt_core::elf_int::get_elfio(m_elf), m_pdi_buf);
+
       m_arg2patcher = initialize_arg_patchers(xrt_core::elf_int::get_elfio(m_elf));
     }
   }
@@ -853,6 +905,12 @@ public:
       get_preempt_restore() const override
   {
       return m_restore_buf;
+  }
+
+  [[nodiscard]] const buf&
+      get_pdi() const override
+  {
+      return m_pdi_buf;
   }
 
   [[nodiscard]] virtual size_t
@@ -939,6 +997,7 @@ class module_sram : public module_impl
   xrt::bo m_scratch_pad_mem;
   xrt::bo m_preempt_save_bo;
   xrt::bo m_preempt_restore_bo;
+  xrt::bo m_pdi_bo;
 
   // Column bo address is the address of the ctrlcode for each column
   // in the (sram) buffer object.  The first ctrlcode is at the base
@@ -954,6 +1013,36 @@ class module_sram : public module_impl
   // Dirty bit to indicate that patching was done prior to last
   // buffer sync to device.
   bool m_dirty{ false };
+
+  union debug_flag_union {
+    struct debug_mode_struct {
+      uint32_t dump_control_codes     : 1;
+      uint32_t dump_control_packet    : 1;
+      uint32_t dump_preemption_codes  : 1;
+      uint32_t reserved : 29;
+    } debug_flags;
+    uint32_t all;
+  }m_debug_mode = {};
+  static uint32_t s_id; //TODO: it needs come from the elf file
+
+  bool
+  inline is_dump_control_codes() const {
+    return m_debug_mode.debug_flags.dump_control_codes != 0;
+  }
+
+  bool
+  inline is_dump_control_packet() const {
+    return m_debug_mode.debug_flags.dump_control_packet != 0;
+  }
+
+  bool
+  inline is_dump_preemption_codes() {
+    return m_debug_mode.debug_flags.dump_preemption_codes != 0;
+  }
+
+  uint32_t get_id() const {
+    return s_id;
+  }
 
   // For separated multi-column control code, compute the ctrlcode
   // buffer object address of each column (used in ert_dpu_data).
@@ -1019,22 +1108,32 @@ class module_sram : public module_impl
     // copy instruction into bo
     fill_bo_with_data(m_instr_bo, data);
 
-#ifdef _DEBUG
-    dump_bo(m_instr_bo, "instrBo.bin");
-#endif
+    if (is_dump_control_codes()) {
+      std::string message = "ctr_codes size: " + std::to_string(sz);
+      xrt_core::message::send( xrt_core::message::severity_level::debug, "xrt_module", message);
+      std::string dump_file_name = "ctr_codes_pre_patch" + std::to_string(get_id()) + ".bin";
+      dump_bo(m_instr_bo, dump_file_name);
+    }
 
     const auto& preempt_save_data = parent->get_preempt_save();
     auto preempt_save_data_size = preempt_save_data.size();
-    if (preempt_save_data_size > 0) {
-      m_preempt_save_bo = xrt::bo{ m_hwctx, preempt_save_data_size, xrt::bo::flags::cacheable, 1 /* fix me */ };
-      fill_bo_with_data(m_preempt_save_bo, preempt_save_data);
-    }
 
     const auto& preempt_restore_data = parent->get_preempt_restore();
     auto preempt_restore_data_size = preempt_restore_data.size();
-    if (preempt_restore_data_size > 0) {
+
+    if ((preempt_save_data_size > 0) && (preempt_restore_data_size > 0)) {
+      m_preempt_save_bo = xrt::bo{ m_hwctx, preempt_save_data_size, xrt::bo::flags::cacheable, 1 /* fix me */ };
+      fill_bo_with_data(m_preempt_save_bo, preempt_save_data);
+
       m_preempt_restore_bo = xrt::bo{ m_hwctx, preempt_restore_data_size, xrt::bo::flags::cacheable, 1 /* fix me */ };
       fill_bo_with_data(m_preempt_restore_bo, preempt_restore_data);
+
+      if (is_dump_preemption_codes()) {
+        std::string dump_file_name = "preemption_save_pre_patch" + std::to_string(get_id()) + ".bin";
+        dump_bo(m_preempt_save_bo, dump_file_name);
+        dump_file_name = "preemption_restore_pre_patch" + std::to_string(get_id()) + ".bin";
+        dump_bo(m_preempt_restore_bo, dump_file_name);
+      }
     }
 
     if ((preempt_save_data_size > 0) && (preempt_restore_data_size > 0)) {
@@ -1042,6 +1141,24 @@ class module_sram : public module_impl
       m_scratch_pad_mem = xrt::ext::bo{ m_hwctx, m_parent->get_scratch_pad_mem_size() };
       patch_instr(m_preempt_save_bo, Scratch_Pad_Mem_Symbol, 0, m_scratch_pad_mem, patcher::buf_type::preempt_save);
       patch_instr(m_preempt_restore_bo, Scratch_Pad_Mem_Symbol, 0, m_scratch_pad_mem, patcher::buf_type::preempt_restore);
+    }
+
+    const auto& pdi_data = parent->get_pdi();
+    auto pdi_data_size = pdi_data.size();
+
+    if (pdi_data_size > 0) {
+        m_pdi_bo = xrt::bo{ m_hwctx, pdi_data_size, xrt::bo::flags::cacheable, 1 /* fix me */ };
+        fill_bo_with_data(m_pdi_bo, pdi_data);
+
+        if (is_dump_control_codes()) {
+            std::stringstream ss;
+            ss << "pdi bo address: " << std::hex << m_pdi_bo.address();
+            xrt_core::message::send(xrt_core::message::severity_level::debug, "xrt_module", ss.str());
+            std::string dump_file_name = "pdi_pre_patch" + std::to_string(get_id()) + ".bin";
+            dump_bo(m_pdi_bo, dump_file_name);
+        }
+
+        patch_instr(m_instr_bo, pdi_symbol, 0, m_pdi_bo, patcher::buf_type::ctrltext);
     }
 
     if (m_ctrlpkt_bo) {
@@ -1068,9 +1185,10 @@ class module_sram : public module_impl
       // copy instruction into bo
       fill_ctrlpkt_buf(m_ctrlpkt_bo, data);
 
-#ifdef _DEBUG
-      dump_bo(m_ctrlpkt_bo, "ctrlpktBo.bin");
-#endif
+      if (is_dump_control_packet()) {
+          std::string dump_file_name = "ctr_packet_pre_patch" + std::to_string(get_id()) + ".bin";
+          dump_bo(m_ctrlpkt_bo, dump_file_name);
+      }
 
       XRT_DEBUGF("<- module_sram::create_ctrlpkt_buffer()\n");
     }
@@ -1175,21 +1293,32 @@ class module_sram : public module_impl
     }
     else if (os_abi == Elf_Amd_Aie2p) {
       m_instr_bo.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-#ifdef _DEBUG
-      dump_bo(m_instr_bo, "instrBoPatched.bin");
-#endif
+
+      if (is_dump_control_codes()) {
+        std::string dump_file_name = "ctr_codes_post_patch" + std::to_string(get_id()) + ".bin";
+        dump_bo(m_instr_bo, dump_file_name);
+      }
+
       if (m_ctrlpkt_bo) {
         m_ctrlpkt_bo.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-#ifdef _DEBUG
-        dump_bo(m_ctrlpkt_bo, "ctrlpktBoPatched.bin");
-#endif
+
+        if (is_dump_control_packet()) {
+          std::string dump_file_name = "ctr_packet_post_patch" + std::to_string(get_id()) + ".bin";
+          dump_bo(m_ctrlpkt_bo, dump_file_name);
         }
+      }
 
-      if (m_preempt_save_bo)
+      if (m_preempt_save_bo && m_preempt_restore_bo) {
         m_preempt_save_bo.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-
-      if (m_preempt_restore_bo)
         m_preempt_restore_bo.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+        if (is_dump_preemption_codes()) {
+          std::string dump_file_name = "preemption_save_post_patch" + std::to_string(get_id()) + ".bin";
+          dump_bo(m_preempt_save_bo, dump_file_name);
+          dump_file_name = "preemption_restore_post_patch" + std::to_string(get_id()) + ".bin";
+          dump_bo(m_preempt_restore_bo, dump_file_name);
+        }
+      }
     }
 
     m_dirty = false;
@@ -1248,6 +1377,11 @@ public:
     , m_parent{ std::move(parent) }
     , m_hwctx{ std::move(hwctx) }
   {
+    m_debug_mode.debug_flags.dump_control_codes = xrt_core::config::get_feature_toggle("Debug.dump_control_codes");
+    m_debug_mode.debug_flags.dump_control_packet = xrt_core::config::get_feature_toggle("Debug.dump_control_packet");
+    m_debug_mode.debug_flags.dump_preemption_codes = xrt_core::config::get_feature_toggle("Debug.dump_preemption_codes");
+    s_id++;
+
     auto os_abi = m_parent.get()->get_os_abi();
 
     if (os_abi == Elf_Amd_Aie2p) {
@@ -1280,6 +1414,7 @@ public:
       return m_scratch_pad_mem;
   }
 };
+uint32_t module_sram::s_id = 0;
 
 } // namespace xrt
 
