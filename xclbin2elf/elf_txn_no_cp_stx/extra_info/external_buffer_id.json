@@ -1,0 +1,25 @@
+{
+    "ctrlcode" : {
+        "config_uuid" : "2a0829b8-9721-48ad-b6de-680791f8bf4b"
+    },
+    "external_buffers": {
+        "buffer0": {
+            "xrt_id": 0,
+            "logical_id": 0,
+            "size_in_bytes": 1536,
+            "name": "g_compute_graph.ifm_ddr"
+        },
+        "buffer1": {
+            "xrt_id": 1,
+            "logical_id": 1,
+            "size_in_bytes": 245760,
+            "name": "g_compute_graph.wts_ddr"
+        },
+        "buffer2": {
+            "xrt_id": 2,
+            "logical_id": 2,
+            "size_in_bytes": 320,
+            "name": "g_compute_graph.ofm_ddr"
+        }
+    }
+}

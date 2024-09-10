@@ -1520,6 +1520,13 @@ private:
     throw xrt_core::error("No such kernel '" + nm + "'");
   }
 
+  xrt::xclbin::kernel
+  get_kernel_or_error(const xrt::hw_context hwctx, const std::string& nm)
+  {
+    printf("__larry_kernel: in %s cp 1\n", __func__);
+    return xrt_core::hw_context_int::get_kernel(hwctx);
+  }
+
 public:
   // kernel_type - constructor
   //
@@ -1544,6 +1551,7 @@ public:
   {
     XRT_DEBUGF("kernel_impl::kernel_impl(%d)\n" , uid);
 
+    printf("__larry_kernel: in %s cp 1\n", __func__);
     // mailbox kernels opens CU in exclusive mode for direct read/write access
     if (properties.mailbox != mailbox_type::none || properties.counted_auto_restart > 0) {
         XRT_DEBUGF("kernel_impl mailbox or counted auto restart detected, changing access mode to exclusive");
@@ -1579,9 +1587,28 @@ public:
     m_usage_logger->log_kernel_info(device->core_device.get(), hwctx, name, args.size());
   }
 
+  kernel_impl(std::shared_ptr<device_type> dev, xrt::hw_context ctx, xrt::module mod, const std::string& nm, int flag)
+    : name(nm.substr(0,nm.find(":")))                          // filter instance names
+    , device(std::move(dev))                                   // share ownership
+    , ctxmgr(xrt_core::context_mgr::create(device->core_device.get())) // owership tied to kernel_impl
+    , hwctx(std::move(ctx))                                    // hw context
+ // , hwqueue(hwctx)                                           // hw queue
+ // , m_module{std::move(mod)}                                 // module if any
+ // , xclbin(hwctx.get_xclbin())                               // xclbin with kernel
+    , xkernel(get_kernel_or_error(hwctx, nm))                              // kernel meta data managed by xclbin
+    , properties(xrt_core::xclbin_int::get_properties(xkernel))// cache kernel properties
+    , uid(create_uid())
+  {}
+
   // Delegating constructor with no module
   kernel_impl(std::shared_ptr<device_type> dev, xrt::hw_context ctx, const std::string& nm)
     : kernel_impl{std::move(dev), std::move(ctx), {}, nm}
+  {
+    printf("__larry_kernel: enter %s \n", __func__);
+  }
+
+  kernel_impl(std::shared_ptr<device_type> dev, xrt::hw_context ctx, const std::string& nm, int flag)
+    : kernel_impl{std::move(dev), std::move(ctx), {}, nm, flag}
   {}
 
   std::shared_ptr<kernel_impl>
@@ -3454,6 +3481,14 @@ alloc_kernel_from_module(const std::shared_ptr<device_type>& dev,
   return std::make_shared<xrt::kernel_impl>(dev, hwctx, module, name);
 }
 
+static std::shared_ptr<xrt::kernel_impl>
+alloc_kernel_from_name(const std::shared_ptr<device_type>& dev,
+                       const xrt::hw_context& hwctx,
+                       const std::string& name)
+{
+  return std::make_shared<xrt::kernel_impl>(dev, hwctx, name, 1);
+}
+
 static std::shared_ptr<xrt::mailbox_impl>
 get_mailbox_impl(const xrt::run& run)
 {
@@ -4136,6 +4171,10 @@ kernel(const xrt::hw_context& ctx, const xrt::module& mod, const std::string& na
   : xrt::kernel::kernel{alloc_kernel_from_module(get_device(ctx.get_device()), ctx, mod, name)}
 {}
 
+kernel::
+kernel(const xrt::hw_context& ctx, const std::string& name)
+  : xrt::kernel::kernel{alloc_kernel_from_name(get_device(ctx.get_device()), ctx, name)}
+{}
 } // xrt::ext
 
 ////////////////////////////////////////////////////////////////

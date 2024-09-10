@@ -25,6 +25,7 @@
 #include <boost/algorithm/string.hpp>
 
 #include <array>
+#include <cxxabi.h>
 #include <filesystem>
 #include <fstream>
 #include <numeric>
@@ -63,6 +64,33 @@ static const std::array<axlf_section_kind, max_sections> kinds = {
   IP_METADATA,
   AIE_TRACE_METADATA
 };
+
+static std::string
+demangle(const char* mangled_name) {
+  int status = 0;
+  char* demangled_name = abi::__cxa_demangle(mangled_name, nullptr, nullptr,  &status);
+
+  if (status == 0) {
+      std::string result(demangled_name);
+      std::free(demangled_name); // Free the allocated memory
+      return result;
+  } else {
+      return "Error in demangling";
+  }
+}
+
+static std::vector<std::string>
+split(const std::string& s, char delimiter) {
+  std::vector<std::string> tokens;
+  std::stringstream ss(s);
+  std::string item;
+
+  while (getline(ss, item, delimiter)) {
+    tokens.push_back(item);
+  }
+
+  return tokens;
+}
 
 static std::vector<char>
 read_file(const std::string& fnm)
@@ -299,6 +327,53 @@ public: // purposely not a struct to match decl in xrt_xclbin.h
   std::vector<xrt_core::xclbin::kernel_argument> m_arginfo;
 
 public:
+#if 1
+  kernel_impl(xrt::hw_context::temp_elf_type& elf_param)
+  {
+    std::string mangled_name;
+    for (auto e : elf_param) {
+      std::cout << "elf param: " << e.first << std::endl;
+      if (e.first == "kernel") {
+        mangled_name = e.second;
+        continue;
+      }
+    }
+
+    std::cout << "mangled name is " << mangled_name << std::endl;
+
+    // demangle
+    std::string demangled_name = demangle(mangled_name.c_str());
+    std::cout << "demangled name is " << demangled_name << std::endl;
+
+    // extract kernel name
+    size_t pos = demangled_name.find('(');
+    if (pos != std::string::npos) {
+      std::string namestring = demangled_name.substr(0, pos);
+      std::cout << "kernel name is " << namestring << std::endl;
+      m_name = namestring;
+    }
+
+    // extract kernel arguments
+    size_t startPos = demangled_name.find('(');
+    size_t endPos = demangled_name.find(')', startPos);
+
+    if (startPos != std::string::npos && endPos != std::string::npos && startPos < endPos) {
+      std::string argstring = demangled_name.substr(startPos + 1, endPos - startPos - 1);
+      std::vector<std::string> argstrings = split(argstring, ',');
+
+      for (const std::string& str : argstrings) {
+        std::cout << str << std::endl;
+      }
+    }
+
+    m_properties.type = xrt_core::xclbin::kernel_properties::kernel_type::dpu;
+    printf("__larry_xclbin: enter %s\n", __func__);
+
+    // xclbin::arg_impl argimpl;
+    // m_args.emplace_back(argimpl);
+  }
+#endif
+
   kernel_impl(std::string&& nm,
               xrt_core::xclbin::kernel_properties&& props,
               std::vector<xclbin::ip>&& cus,
@@ -1552,6 +1627,14 @@ send_exception_message(const char* msg)
 ////////////////////////////////////////////////////////////////
 namespace xrt_core::xclbin_int {
 
+std::shared_ptr<xrt::xclbin::kernel_impl>
+init_kernel_from_elf(xrt::hw_context::temp_elf_type& elf_param)
+{
+  printf("__larry_xclbin: in %s, size of elf_param is %ld\n", __func__, elf_param.size());
+
+  return std::make_shared<xrt::xclbin::kernel_impl>(elf_param);
+}
+
 const axlf*
 get_axlf(xrtXclbinHandle handle)
 {
@@ -1586,6 +1669,7 @@ read_xclbin(const std::string& fnm)
 const xrt_core::xclbin::kernel_properties&
 get_properties(const xrt::xclbin::kernel& kernel)
 {
+  printf("__larry_xclbin: enter %s\n", __func__);
   return kernel.get_handle()->m_properties;
 }
 

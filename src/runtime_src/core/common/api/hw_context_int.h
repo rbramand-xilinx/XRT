@@ -43,6 +43,9 @@ XRT_CORE_COMMON_EXPORT
 xrt::hw_context
 create_hw_context_from_implementation(void* hwctx_impl);
 
+xrt::xclbin::kernel
+get_kernel(const xrt::hw_context& hwctx);
+
 }} // hw_context_int, xrt_core
 
 #endif
