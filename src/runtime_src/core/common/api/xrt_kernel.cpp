@@ -1086,7 +1086,7 @@ private:
     size_t size;   // size in bytes of argument per xclbin
 
     explicit
-    global_type(size_t bytes)
+    global_type(size_t bytes = 0)
       : size(bytes)
     {}
 
@@ -1306,7 +1306,7 @@ private:
   xrt::xclbin::kernel xkernel;         // kernel xclbin metadata
   std::vector<argument> args;          // kernel args sorted by argument index
   std::vector<ipctx> ipctxs;           // CU context locks
-  const property_type& properties;     // Kernel properties from XML meta
+  property_type properties;     // Kernel properties from XML meta
   std::bitset<max_cus> cumask;         // cumask for command execution
   size_t regmap_size = 0;              // CU register map size
   size_t fa_num_inputs = 0;            // Fast adapter number of inputs per meta data
@@ -1520,12 +1520,27 @@ private:
     throw xrt_core::error("No such kernel '" + nm + "'");
   }
 
+  static std::vector<std::string>
+  split(const std::string& s, char delimiter)
+  {
+    std::vector<std::string> tokens;
+    std::stringstream ss(s);
+    std::string item;
+
+    while (getline(ss, item, delimiter)) {
+      tokens.push_back(item);
+    }
+    return tokens;
+  }
+
+#if 0
   xrt::xclbin::kernel
   get_kernel_or_error(const xrt::hw_context hwctx, const std::string& nm)
   {
     printf("__larry_kernel: in %s cp 1\n", __func__);
     return xrt_core::hw_context_int::get_kernel(hwctx);
   }
+#endif
 
 public:
   // kernel_type - constructor
@@ -1549,9 +1564,6 @@ public:
     , properties(xrt_core::xclbin_int::get_properties(xkernel))// cache kernel properties
     , uid(create_uid())
   {
-    XRT_DEBUGF("kernel_impl::kernel_impl(%d)\n" , uid);
-
-    printf("__larry_kernel: in %s cp 1\n", __func__);
     // mailbox kernels opens CU in exclusive mode for direct read/write access
     if (properties.mailbox != mailbox_type::none || properties.counted_auto_restart > 0) {
         XRT_DEBUGF("kernel_impl mailbox or counted auto restart detected, changing access mode to exclusive");
@@ -1592,23 +1604,82 @@ public:
     , device(std::move(dev))                                   // share ownership
     , ctxmgr(xrt_core::context_mgr::create(device->core_device.get())) // owership tied to kernel_impl
     , hwctx(std::move(ctx))                                    // hw context
- // , hwqueue(hwctx)                                           // hw queue
- // , m_module{std::move(mod)}                                 // module if any
- // , xclbin(hwctx.get_xclbin())                               // xclbin with kernel
-    , xkernel(get_kernel_or_error(hwctx, nm))                              // kernel meta data managed by xclbin
-    , properties(xrt_core::xclbin_int::get_properties(xkernel))// cache kernel properties
+    , hwqueue(hwctx)                                           // hw queue
+    , m_module{std::move(mod)}                                 // module if any
+    , xclbin(hwctx.get_xclbin())                               // xclbin with kernel
+    //, xkernel(get_kernel_or_error(xclbin, name))               // kernel meta data managed by xclbin
+    //, properties(xrt_core::xclbin_int::get_properties(xkernel))// cache kernel properties
     , uid(create_uid())
-  {}
+  {
+    XRT_DEBUGF("kernel_impl::kernel_impl(%d)\n" , uid);
+
+    printf("__larry_kernel: in %s cp 1\n", __func__);
+
+    // xclbin elf use case, create kernel
+    // get kernel signature from the module
+    auto demangled_name = xrt_core::module_int::get_kernel_signature(m_module);
+      
+    // extract kernel name
+    size_t pos = demangled_name.find('(');
+    if (pos == std::string::npos)
+      throw std::runtime_error("Failed to get kernel - " + nm);
+
+    name = demangled_name.substr(0, pos);
+
+    // extract kernel arguments
+    size_t startPos = demangled_name.find('(');
+    size_t endPos = demangled_name.find(')', startPos);
+
+    if (startPos == std::string::npos || endPos == std::string::npos || startPos > endPos)
+      throw std::runtime_error("Failed to get kernel args");
+
+    std::string argstring = demangled_name.substr(startPos + 1, endPos - startPos - 1);
+    std::vector<std::string> argstrings = split(argstring, ',');
+
+    size_t count = 0;
+    size_t offset = 0;
+    for (const std::string& str : argstrings) {
+      // if arg has pointer(*) in its name (eg: char*, void*) it is of type global otherwise scalar
+      // in this new flow all the args are of type global
+      // so each arg size is 0x8 and offset starts at 0 for 0th arg and is incremented by 0x8
+      if (str.find('*') == std::string::npos)
+        throw std::runtime_error("arg type not supported for this kind of kernel");
+
+      xrt_core::xclbin::kernel_argument arg;
+      arg.name = "argv" + std::to_string(count);
+      arg.hosttype = "no-type";
+      arg.port = "no-port";
+      arg.index = count;
+      arg.size = 0x8;
+      arg.offset = offset;
+      arg.dir = xrt_core::xclbin::kernel_argument::direction::input;
+      arg.type = xrt_core::xclbin::kernel_argument::argtype::global;
+
+      args.emplace_back(arg);
+      count ++;
+      offset += 0x8;
+    }
+
+    // fill kernel properties
+    properties.name = name;
+    properties.type = xrt_core::xclbin::kernel_properties::kernel_type::dpu;
+    properties.counted_auto_restart = xrt_core::xclbin::get_restart_from_ini(name);
+    properties.mailbox = xrt_core::xclbin::get_mailbox_from_ini(name);
+    properties.sw_reset = xrt_core::xclbin::get_sw_reset_from_ini(name);
+
+    // amend args with computed data based on kernel protocol
+    amend_args();
+
+    m_usage_logger->log_kernel_info(device->core_device.get(), hwctx, name, args.size());
+  }
 
   // Delegating constructor with no module
   kernel_impl(std::shared_ptr<device_type> dev, xrt::hw_context ctx, const std::string& nm)
     : kernel_impl{std::move(dev), std::move(ctx), {}, nm}
-  {
-    printf("__larry_kernel: enter %s \n", __func__);
-  }
+  {}
 
   kernel_impl(std::shared_ptr<device_type> dev, xrt::hw_context ctx, const std::string& nm, int flag)
-    : kernel_impl{std::move(dev), std::move(ctx), {}, nm, flag}
+    : kernel_impl{std::move(dev), std::move(ctx), xrt_core::module_int::get_module(name), nm, flag}
   {}
 
   std::shared_ptr<kernel_impl>
@@ -3486,7 +3557,7 @@ alloc_kernel_from_name(const std::shared_ptr<device_type>& dev,
                        const xrt::hw_context& hwctx,
                        const std::string& name)
 {
-  return std::make_shared<xrt::kernel_impl>(dev, hwctx, name, 1);
+  return std::make_shared<xrt::kernel_impl>(dev, hwctx, xrt_core::module_int::get_module(name), name, true);
 }
 
 static std::shared_ptr<xrt::mailbox_impl>

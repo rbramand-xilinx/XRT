@@ -43,6 +43,8 @@ public:
   module()
   {}
 
+  ~module();
+
   /**
    * module() - Constructor from elf
    *
