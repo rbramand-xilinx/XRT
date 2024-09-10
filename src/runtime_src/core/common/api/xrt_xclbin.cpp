@@ -25,7 +25,6 @@
 #include <boost/algorithm/string.hpp>
 
 #include <array>
-#include <cxxabi.h>
 #include <filesystem>
 #include <fstream>
 #include <numeric>
@@ -63,33 +62,6 @@ static const std::array<axlf_section_kind, max_sections> kinds = {
   AIE_PARTITION,
   IP_METADATA
 };
-
-static std::string
-demangle(const char* mangled_name) {
-  int status = 0;
-  char* demangled_name = abi::__cxa_demangle(mangled_name, nullptr, nullptr,  &status);
-
-  if (status == 0) {
-      std::string result(demangled_name);
-      std::free(demangled_name); // Free the allocated memory
-      return result;
-  } else {
-      return "Error in demangling";
-  }
-}
-
-static std::vector<std::string>
-split(const std::string& s, char delimiter) {
-  std::vector<std::string> tokens;
-  std::stringstream ss(s);
-  std::string item;
-
-  while (getline(ss, item, delimiter)) {
-    tokens.push_back(item);
-  }
-
-  return tokens;
-}
 
 static std::vector<char>
 read_file(const std::string& fnm)
@@ -326,7 +298,7 @@ public: // purposely not a struct to match decl in xrt_xclbin.h
   std::vector<xrt_core::xclbin::kernel_argument> m_arginfo;
 
 public:
-#if 1
+#if 0
   kernel_impl(xrt::hw_context::temp_elf_type& elf_param)
   {
     std::string mangled_name;
@@ -1625,7 +1597,7 @@ send_exception_message(const char* msg)
 // xclbin using C pointer to xclbin
 ////////////////////////////////////////////////////////////////
 namespace xrt_core::xclbin_int {
-
+#if 0
 std::shared_ptr<xrt::xclbin::kernel_impl>
 init_kernel_from_elf(xrt::hw_context::temp_elf_type& elf_param)
 {
@@ -1633,6 +1605,7 @@ init_kernel_from_elf(xrt::hw_context::temp_elf_type& elf_param)
 
   return std::make_shared<xrt::xclbin::kernel_impl>(elf_param);
 }
+#endif
 
 const axlf*
 get_axlf(xrtXclbinHandle handle)

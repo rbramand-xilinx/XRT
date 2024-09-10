@@ -47,6 +47,12 @@ sync(const xrt::module&);
 ert_cmd_opcode
 get_ert_opcode(const xrt::module& module);
 
+xrt::module
+get_module(const std::string& name);
+
+std::string
+get_kernel_signature(const xrt::module& module);
+
 } // xrt_core::module_int
 
 #endif
