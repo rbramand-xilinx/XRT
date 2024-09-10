@@ -26,6 +26,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <cxxabi.h>
 #include <numeric>
 #include <map>
 #include <set>
@@ -276,33 +277,47 @@ struct patcher
   }
 };
 
-  XRT_CORE_UNUSED void
-  dump_bo(xrt::bo& bo, const std::string& filename)
-  {
-    std::ofstream ofs(filename, std::ios::out | std::ios::binary);
-    if (!ofs.is_open())
-      throw std::runtime_error("Failure opening file " + filename + " for writing!");
+XRT_CORE_UNUSED void
+dump_bo(xrt::bo& bo, const std::string& filename)
+{
+  std::ofstream ofs(filename, std::ios::out | std::ios::binary);
+  if (!ofs.is_open())
+    throw std::runtime_error("Failure opening file " + filename + " for writing!");
 
-    auto buf = bo.map<char*>();
-    ofs.write(buf, bo.size());
-  }
+  auto buf = bo.map<char*>();
+  ofs.write(buf, bo.size());
+}
 
-  XRT_CORE_UNUSED std::string
-  generate_key_string(const std::string& argument_name, patcher::buf_type type)
-  {
-    std::string buf_string = std::to_string(static_cast<int>(type));
-    return argument_name + buf_string;
-  }
+XRT_CORE_UNUSED std::string
+generate_key_string(const std::string& argument_name, patcher::buf_type type)
+{
+  std::string buf_string = std::to_string(static_cast<int>(type));
+  return argument_name + buf_string;
+}
+
+static std::string
+demangle(const std::string& mangled_name)
+{
+  int status = 0;
+  char* demangled_name = abi::__cxa_demangle(mangled_name.c_str(), nullptr, nullptr,  &status);
+
+  if (status)
+    throw std::runtime_error("Error demangling kernel signature");
+
+  std::string result {demangled_name};
+  std::free(demangled_name); // Free the allocated memory
+  return result;
+}
 
 } // namespace
 
 namespace xrt
 {
-
 // class module_impl - Base class for different implementations
 class module_impl
 {
   xrt::uuid m_cfg_uuid;   // matching hw configuration id
+
 public:
   explicit module_impl(xrt::uuid cfg_uuid)
     : m_cfg_uuid(std::move(cfg_uuid))
@@ -319,6 +334,8 @@ public:
   module_impl(module_impl&&) = delete;
   module_impl& operator=(const module_impl&) = delete;
   module_impl& operator=(module_impl&&) = delete;
+
+  static std::vector<xrt::module> m_module_map;
 
   [[nodiscard]] xrt::uuid
   get_cfg_uuid() const
@@ -470,7 +487,36 @@ public:
   {
     throw std::runtime_error("Not supported");
   }
+
+  std::string
+  get_demangled_kernel_signature() const
+  {
+    // Gets kernel signature or throws error if not applicable
+  
+    // TODO : add code to get kernel signature
+    // Use default signature for now
+    std::string kernel_sig {"_Z3DPUPvS_S_S_S_"};
+
+    // demangle and return
+    return demangle(kernel_sig);
+  }
+
+  std::string
+  get_kernel_name() const
+  {
+    std::string demangled_name = get_demangled_kernel_signature();
+
+    // extract kernel name
+    size_t pos = demangled_name.find('(');
+    if (pos == std::string::npos)
+      throw std::runtime_error("Failed to get kernel name");
+
+    return demangled_name.substr(0, pos);
+  }
 };
+
+std::vector<xrt::module>
+module_impl::m_module_map;
 
 // class module_elf - Elf provided by application
 //
@@ -1571,6 +1617,28 @@ dump_scratchpad_mem(const xrt::module& module)
   module_sram->dump_scratchpad_mem();
 }
 
+xrt::module
+get_module(const std::string& name)
+{
+  // iterate over modules in module map and get the kernel signature
+  // demangle the kernel signature and get kernel name
+  // match it with name provided and return
+  for (const auto& m : xrt::module_impl::m_module_map) {
+    try {
+      if (name == m.get_handle()->get_kernel_name())
+        return m;
+    }
+    catch (...) {}
+  }
+  throw std::runtime_error("No module found with kernel : " + name);
+}
+
+std::string
+get_kernel_signature(const xrt::module& module)
+{
+  return module.get_handle()->get_demangled_kernel_signature();
+}
+
 } // xrt_core::module_int
 
 ////////////////////////////////////////////////////////////////
@@ -1581,17 +1649,32 @@ namespace xrt
 module::
 module(const xrt::elf& elf)
 : detail::pimpl<module_impl>{ std::make_shared<module_elf>(elf) }
-{}
+{
+  module_impl::m_module_map.emplace_back(*this);
+}
 
 module::
 module(void* userptr, size_t sz, const xrt::uuid& uuid)
 : detail::pimpl<module_impl>{ std::make_shared<module_userptr>(userptr, sz, uuid) }
-{}
+{
+  module_impl::m_module_map.emplace_back(*this);
+}
 
 module::
 module(const xrt::module& parent, const xrt::hw_context& hwctx)
 : detail::pimpl<module_impl>{ std::make_shared<module_sram>(parent.handle, hwctx) }
-{}
+{
+  //module_impl::m_module_map.emplace_back(*this);
+}
+
+module::
+~module()
+{
+  module_impl::m_module_map.erase(std::remove_if(module_impl::m_module_map.begin(),
+                                                 module_impl::m_module_map.end(),
+                                                 [this](const xrt::module& obj){ return &obj == this; }),
+                                  module_impl::m_module_map.end());
+}
 
 xrt::uuid
 module::

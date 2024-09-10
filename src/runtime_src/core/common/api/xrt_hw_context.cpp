@@ -35,7 +35,7 @@ class hw_context_impl : public std::enable_shared_from_this<hw_context_impl>
   cfg_param_type m_cfg_param;
   temp_elf_type m_elf_param;
   access_mode m_mode;
-  xrt::xclbin::kernel m_kernel;
+  //xrt::xclbin::kernel m_kernel;
   std::unique_ptr<xrt_core::hwctx_handle> m_hdl;
   std::shared_ptr<xrt_core::usage_metrics::base_logger> m_usage_logger =
       xrt_core::usage_metrics::get_usage_metrics_logger();
@@ -60,7 +60,8 @@ public:
   hw_context_impl(std::shared_ptr<xrt_core::device> device, temp_elf_type elf_param)
     : m_core_device{std::move(device)}
     , m_elf_param(std::move(elf_param))
-    , m_kernel{xrt_core::xclbin_int::init_kernel_from_elf(m_elf_param)}
+    , m_mode{access_mode::shared}
+    //, m_kernel{xrt_core::xclbin_int::init_kernel_from_elf(m_elf_param)}
     , m_hdl{m_core_device->create_hw_context(m_elf_param)}
   {
     printf("__larry_hwctx: enter %s\n", __func__);
@@ -143,12 +144,14 @@ public:
     return m_usage_logger.get();
   }
 
+#if 0
   xrt::xclbin::kernel
   get_kernel()
   {
     printf("__larry_hwctx: enter hw_context::get_kernel\n");
     return m_kernel;
   }
+#endif
 };
 
 } // xrt
@@ -186,12 +189,14 @@ create_hw_context_from_implementation(void* hwctx_impl)
   return xrt::hw_context(impl_ptr->get_shared_ptr());
 }
 
+#if 0
 xrt::xclbin::kernel
 get_kernel(const xrt::hw_context& hwctx)
 {
   printf("__larry_hwctx: enter xrt_core::hw_context_int::get_kernel\n");
   return hwctx.get_handle()->get_kernel();
 }
+#endif
 
 } // xrt_core::hw_context_int
 
