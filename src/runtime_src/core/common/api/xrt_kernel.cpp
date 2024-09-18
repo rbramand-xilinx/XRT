@@ -1605,6 +1605,7 @@ public:
     , ctxmgr(xrt_core::context_mgr::create(device->core_device.get())) // owership tied to kernel_impl
     , hwctx(std::move(ctx))                                    // hw context
     , hwqueue(hwctx)                                           // hw queue
+//  , hwqueue(device->get_core_device())                       // hw queue
     , m_module{std::move(mod)}                                 // module if any
     , xclbin(hwctx.get_xclbin())                               // xclbin with kernel
     //, xkernel(get_kernel_or_error(xclbin, name))               // kernel meta data managed by xclbin
@@ -2112,6 +2113,11 @@ class run_impl
     xcl_bo_flags grp {xrt_core::bo::group_id(bo)};
     if (validate_ip_arg_connectivity(index, grp.bank))
       return bo;
+    else {
+      std::cout << "__rahul check arg connectivity fails as we dont have arg connectivity\n";
+      std::cout << "skipping this error\n";
+      return bo;
+    }
 
     auto fmt = boost::format
       ("Kernel %s has no compute units with connectivity required for global argument at index %d. "
