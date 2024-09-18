@@ -1637,6 +1637,10 @@ public:
     std::string argstring = demangled_name.substr(startPos + 1, endPos - startPos - 1);
     std::vector<std::string> argstrings = split(argstring, ',');
 
+    // set cu_mask as 0x1, this should be removed once we use new firmware
+    unsigned int cu_idx = 0;
+    cumask.set(cu_idx);
+
     size_t count = 0;
     size_t offset = 0;
     for (const std::string& str : argstrings) {
