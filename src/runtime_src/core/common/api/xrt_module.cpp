@@ -1274,6 +1274,10 @@ class module_sram : public module_impl
   void
   patch_value(const std::string& argnm, size_t index, uint64_t value)
   {
+    // HACK : index and arg num differ in new elf flow
+    // this should be removed once we have proper elf
+    index += 3;
+
     bool patched = false;
     if (m_parent->get_os_abi() == Elf_Amd_Aie2p) {
       // patch control-packet buffer
@@ -1394,6 +1398,10 @@ class module_sram : public module_impl
      npu->instruction_buffer_size = static_cast<uint32_t>(m_instr_bo.size());
      npu->instruction_prop_count = 0; // Reserved for future use
      payload += sizeof(ert_npu_data) / sizeof(uint32_t);
+
+     // fill opcode 3 for new ert flow at start of payload
+     *payload = 3;
+     payload += 2;
 
      return payload;
   }
