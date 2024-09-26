@@ -45,6 +45,7 @@ namespace
 static constexpr size_t column_page_size = AIE_COLUMN_PAGE_SIZE;
 static constexpr uint8_t Elf_Amd_Aie2p  = 69;
 static constexpr uint8_t Elf_Amd_Aie2ps = 64;
+static constexpr uint8_t ELF_Amd_Config = 70;
 
 static const char* Scratch_Pad_Mem_Symbol = "scratch-pad-mem";
 static const char* Control_Packet_Symbol = "control-packet";
@@ -98,6 +99,7 @@ struct buf
 using instr_buf = buf;
 using control_packet = buf;
 using ctrlcode = buf; // represent control code for column or partition
+using pdi = buf;
 
 // struct patcher - patcher for a symbol
 //
@@ -978,6 +980,66 @@ public:
   }
 };
 
+// class module_config - module for config
+//
+// Construct a module from a config ELF file provided by the application.
+//
+// The ELF is mined for pdis section which are used to to patch the control code
+// with the address of a buffer object in which this pdi is loaded
+class module_config : public module_impl
+{
+  using pdi_map = std::map<uint16_t, std::vector<uint8_t>>;
+
+  xrt::elf m_elf;
+  xrt::uuid m_kernel_config_uuid;
+  uint16_t m_partition_size;
+  pdi_map m_pdi_map;
+
+  static xrt::uuid
+  get_kernel_config_uuid(const xrt::elf& elf)
+  {
+    static const char* uuid_section_name = ".note.xrt.config.uuid";
+
+    const auto& elfio = xrt_core::elf_int::get_elfio(elf);
+    const auto uuid_section = elfio.sections[uuid_section_name];
+    if (!uuid_section)
+      throw std::runtime_error("Failed to get config uuid section from elf\n");
+
+    // Get the section data
+    const char* data = uuid_section->get_data();
+    size_t size = uuid_section->get_size();
+
+    // Ensure the section size is 36 bytes (32 hex digits + 4 hyphens)
+    if (size != 36)
+      throw std::runtime_error("Unexpected size for config uuid section from elf");
+
+    std::string uuid_str{data, size};
+    return xrt::uuid{uuid_str};
+  }
+
+  static uint16_t
+  get_partition_size()
+  {
+    return 0;
+  }
+
+  static pdi_map
+  initialize_pdi_map()
+  {
+    pdi_map map;
+    return map;
+  }
+
+public:
+  explicit module_config(xrt::elf elf)
+    : module_impl{ elf.get_cfg_uuid() }
+    , m_elf(std::move(elf))
+    , m_kernel_config_uuid { get_kernel_config_uuid(m_elf) }
+    , m_partition_size { get_partition_size() }
+    , m_pdi_map { initialize_pdi_map() }
+  {}
+};
+
 // class module_userptr - Opaque userptr provided by application
 class module_userptr : public module_impl
 {
@@ -1568,6 +1630,19 @@ get_kernel_signature(const xrt::module& module)
 
 } // xrt_core::module_int
 
+namespace
+{
+static std::shared_ptr<xrt::module_impl>
+create_module(const xrt::elf& elf)
+{
+  if (ELF_Amd_Config == xrt_core::elf_int::get_elfio(elf).get_os_abi())
+    return std::make_shared<xrt::module_config>(elf);
+  else
+    return std::make_shared<xrt::module_elf>(elf);
+
+}
+}
+
 ////////////////////////////////////////////////////////////////
 // xrt_module C++ API implementation (xrt_module.h)
 ////////////////////////////////////////////////////////////////
@@ -1575,7 +1650,8 @@ namespace xrt
 {
 module::
 module(const xrt::elf& elf)
-: detail::pimpl<module_impl>{ std::make_shared<module_elf>(elf) }
+//: detail::pimpl<module_impl>{ std::make_shared<module_elf>(elf) }
+: detail::pimpl<module_impl>{ create_module(elf) }
 {
   module_impl::m_module_map.emplace_back(*this);
 }
