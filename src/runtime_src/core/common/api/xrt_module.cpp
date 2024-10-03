@@ -1532,7 +1532,6 @@ public:
   uint32_t*
   fill_ert_dpu_data_elf_flow(uint32_t *payload) const override
   {
-    printf("TESTING in %s\n", __func__);
     // npu preemption in elf_flow
     auto npu = reinterpret_cast<ert_npu_preempt_data*>(payload);
     npu->instruction_buffer = m_instr_bo.address();
@@ -1572,7 +1571,6 @@ fill_ert_dpu_data(const xrt::module& module, uint32_t* payload)
 uint32_t*
 fill_ert_dpu_data_elf_flow(const xrt::module& module, uint32_t* payload)
 {
-  printf("Helloworld ....%s \n", __func__);	
   return module.get_handle()->fill_ert_dpu_data_elf_flow(payload);
 }
 
