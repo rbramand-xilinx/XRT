@@ -390,6 +390,12 @@ public:
     throw std::runtime_error("Not supported");
   }
 
+  virtual uint32_t*
+  fill_ert_dpu_data_elf_flow(uint32_t *) const
+  {
+    throw std::runtime_error("Not supported");
+  }
+
   [[nodiscard]] virtual uint8_t
   get_os_abi() const
   {
@@ -899,6 +905,9 @@ class module_elf : public module_impl
 
     if (m_os_abi != Elf_Amd_Aie2p)
       throw std::runtime_error("ELF os_abi Not supported");
+ 
+    if (m_pdi_buf_exist)
+      return ERT_START_NPU_PDI_IN_ELF;
 
     if (m_save_buf_exist && m_restore_buf_exist)
       return ERT_START_NPU_PREEMPT;
@@ -1461,10 +1470,6 @@ class module_sram : public module_impl
      npu->instruction_prop_count = 0; // Reserved for future use
      payload += sizeof(ert_npu_data) / sizeof(uint32_t);
 
-     // fill opcode 3 for new ert flow at start of payload
-     *payload = 3;
-     payload += 2;
-
      return payload;
   }
 
@@ -1524,6 +1529,25 @@ public:
     return fill_ert_aie2ps(payload);
   }
 
+  uint32_t*
+  fill_ert_dpu_data_elf_flow(uint32_t *payload) const override
+  {
+    printf("TESTING in %s\n", __func__);
+    // npu preemption in elf_flow
+    auto npu = reinterpret_cast<ert_npu_preempt_data*>(payload);
+    npu->instruction_buffer = m_instr_bo.address();
+    npu->instruction_buffer_size = static_cast<uint32_t>(m_instr_bo.size());
+    npu->instruction_prop_count = 0; // Reserved for future use
+    if (m_preempt_save_bo && m_preempt_restore_bo) {
+      npu->save_buffer = m_preempt_save_bo.address();
+      npu->save_buffer_size = static_cast<uint32_t>(m_preempt_save_bo.size());
+      npu->restore_buffer = m_preempt_restore_bo.address();
+      npu->restore_buffer_size = static_cast<uint32_t>(m_preempt_restore_bo.size());
+    }
+    payload += sizeof(ert_npu_preempt_data) / sizeof(uint32_t);
+    return payload;
+  }
+
   [[nodiscard]] virtual xrt::bo&
       get_scratch_pad_mem() override
   {
@@ -1543,6 +1567,13 @@ uint32_t*
 fill_ert_dpu_data(const xrt::module& module, uint32_t* payload)
 {
   return module.get_handle()->fill_ert_dpu_data(payload);
+}
+
+uint32_t*
+fill_ert_dpu_data_elf_flow(const xrt::module& module, uint32_t* payload)
+{
+  printf("Helloworld ....%s \n", __func__);	
+  return module.get_handle()->fill_ert_dpu_data_elf_flow(payload);
 }
 
 void
