@@ -10,6 +10,8 @@
 #include "core/include/experimental/xrt_bo.h"
 #include "core/include/experimental/xrt_module.h"
 
+#include "ert.h"
+
 #include <string>
 
 namespace xrt_core::module_int {
@@ -49,6 +51,10 @@ sync(const xrt::module&);
 // Get the ERT command opcode in ELF flow
 ert_cmd_opcode
 get_ert_opcode(const xrt::module& module);
+
+// Get partition size if ELF has info
+uint32_t
+get_partition_size(const xrt::module& module);
 
 } // xrt_core::module_int
 
