@@ -44,8 +44,9 @@ namespace
 // 0 if no padding is required.   The page size should be
 // embedded as ELF metadata in the future.
 static constexpr size_t column_page_size = AIE_COLUMN_PAGE_SIZE;
-static constexpr uint8_t Elf_Amd_Aie2p  = 69;
-static constexpr uint8_t Elf_Amd_Aie2ps = 64;
+static constexpr uint8_t Elf_Amd_Aie2p        = 69;
+static constexpr uint8_t Elf_Amd_Aie2ps       = 64;
+static constexpr uint8_t Elf_Amd_Aie2p_config = 70;
 
 static const char* Scratch_Pad_Mem_Symbol = "scratch-pad-mem";
 static const char* Control_Packet_Symbol = "control-packet";
@@ -488,6 +489,13 @@ public:
     throw std::runtime_error("Not supported");
   }
 
+  // get partition size if elf has the info
+  [[nodiscard]] virtual uint32_t
+  get_partition_size() const
+  {
+    throw std::runtime_error("Not supported");
+  }
+
   std::string
   get_demangled_kernel_signature() const
   {
@@ -552,6 +560,7 @@ class module_elf : public module_impl
   buf m_pdi_buf;
   bool m_pdi_buf_exist = false;
   size_t m_scratch_pad_mem_size = 0;
+  uint32_t m_partition_size = UINT32_MAX;
 
   // The ELF sections embed column and page information in their
   // names.  Extract the column and page information from the
@@ -589,6 +598,27 @@ class module_elf : public module_impl
     }
 
     return instrbuf;
+  }
+
+  void
+  initialize_partition_size(const ELFIO::elfio& elf)
+  {
+    static constexpr const char* partition_section_name {".note.xrt.configuration"};
+    // note 0 in .note.xrt.configuration section has partition size
+    static constexpr ELFIO::Elf_Word partition_note_num = 0;
+
+    auto partition_section = elf.sections[partition_section_name];
+    if (!partition_section)
+      return; // elf doesn't have partition info section, partition size holds UINT32_MAX
+
+    ELFIO::note_section_accessor accessor(elf, partition_section);
+    ELFIO::Elf_Word type;
+    std::string name;
+    char* desc;
+    ELFIO::Elf_Word desc_size;
+    if (!accessor.get_note(partition_note_num, type, name, desc, desc_size))
+      throw std::runtime_error("Failed to get partition info, partition note not found\n");
+    m_partition_size = std::stoul(std::string{static_cast<char*>(desc), desc_size});
   }
 
   // Extract control-packet buffer from ELF sections without assuming anything
@@ -948,6 +978,9 @@ public:
 
       m_arg2patcher = initialize_arg_patchers(xrt_core::elf_int::get_elfio(m_elf));
     }
+    else if (m_os_abi == Elf_Amd_Aie2p_config) {
+      initialize_partition_size(xrt_core::elf_int::get_elfio(m_elf));
+    }
   }
 
   [[nodiscard]] const std::vector<ctrlcode>&
@@ -996,6 +1029,15 @@ public:
   number_of_arg_patchers() const override
   {
     return m_arg2patcher.size();
+  }
+
+  [[nodiscard]] virtual uint32_t
+  get_partition_size() const override
+  {
+    if (m_partition_size == UINT32_MAX)
+      throw std::runtime_error("No partition info available, wrong ELF passed\n");
+
+    return m_partition_size;
   }
 };
 
@@ -1645,6 +1687,12 @@ std::string
 get_kernel_signature(const xrt::module& module)
 {
   return module.get_handle()->get_demangled_kernel_signature();
+}
+
+uint32_t
+get_partition_size(const xrt::module& module)
+{
+  return module.get_handle()->get_partition_size();
 }
 
 } // xrt_core::module_int

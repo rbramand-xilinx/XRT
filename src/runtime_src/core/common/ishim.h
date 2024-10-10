@@ -156,6 +156,15 @@ struct ishim
                     const xrt::hw_context::cfg_param_type& /*cfg_params*/,
                     xrt::hw_context::access_mode /*mode*/) const = 0;
 
+  // creates hw context using partition size
+  // Used in elf flow
+  // This function is not supported by all platforms
+  virtual std::unique_ptr<hwctx_handle>
+  create_hw_context(uint32_t /*partition_size*/,
+                    const xrt::hw_context::cfg_param_type& /*cfg_params*/,
+                    xrt::hw_context::access_mode /*mode*/) const
+  { throw not_supported_error{__func__}; }
+
 #if 1
   virtual std::unique_ptr<hwctx_handle>
   create_hw_context(const xrt::hw_context::temp_elf_type&) const
