@@ -114,13 +114,12 @@ struct patcher
 {
   enum class symbol_type {
     uc_dma_remote_ptr_symbol_kind = 1,
-    shim_dma_base_addr_symbol_kind = 2, // patching scheme needed by AIE2PS firmware
+    shim_dma_base_addr_symbol_kind = 2,      // patching scheme needed by AIE2PS firmware
     scalar_32bit_kind = 3,
-    control_packet_48 = 4,              // patching scheme needed by firmware to patch control packet
-    shim_dma_48 = 5,                    // patching scheme needed by firmware to patch instruction buffer
-    shim_dma_aie4_base_addr_symbol_kind = 7, // patching scheme needed by AIE4 firmware
-    address_64 = 6,                     // patch pdi address
-// make address_64 to 7 once we move to new elf
+    control_packet_48 = 4,                   // patching scheme needed by firmware to patch control packet
+    shim_dma_48 = 5,                         // patching scheme needed by firmware to patch instruction buffer
+    shim_dma_aie4_base_addr_symbol_kind = 6, // patching scheme needed by AIE4 firmware
+    address_64 = 7,                          // patch pdi address
     unknown_symbol_kind = 8
   };
 
@@ -140,7 +139,7 @@ struct patcher
                                                                                           ".ctrldata",
                                                                                           ".preempt_save",
                                                                                           ".preempt_restore",
-                                                                                          "pdi0"};
+                                                                                          ".pdi"};
 
     return Section_Name_Array[static_cast<int>(bt)];
   }
@@ -502,6 +501,13 @@ public:
     throw std::runtime_error("Not supported");
   }
 
+  // get kernel signature in mangled format
+  [[nodiscard]] virtual std::string
+  get_kernel_signature() const
+  {
+    throw std::runtime_error("Not supported");
+  }
+
   std::string
   get_demangled_kernel_signature() const
   {
@@ -552,21 +558,20 @@ class module_elf : public module_impl
   constexpr static uint32_t addend_shift = 4;
   constexpr static uint32_t addend_mask = ~((uint32_t)0) << addend_shift;
   constexpr static uint32_t schema_mask = ~addend_mask;
-  xrt::elf m_elf;
+  const ELFIO::elfio& m_elfio; // we should not modify underlying elf
   uint8_t m_os_abi = Elf_Amd_Aie2p;
   std::vector<ctrlcode> m_ctrlcodes;
   std::map<std::string, patcher> m_arg2patcher;
-  instr_buf m_instr_buf;
-  control_packet m_ctrl_packet;
-  bool m_ctrl_packet_exist = false;
+  std::map<uint32_t, instr_buf> m_instr_buf_map;
+  std::map<uint32_t, control_packet> m_ctrl_packet_map;
   buf m_save_buf;
   bool m_save_buf_exist = false;
   buf m_restore_buf;
   bool m_restore_buf_exist = false;
-  buf m_pdi_buf;
-  bool m_pdi_buf_exist = false;
+  std::map<uint32_t, buf> m_pdi_buf_map;
   size_t m_scratch_pad_mem_size = 0;
   uint32_t m_partition_size = UINT32_MAX;
+  std::string m_kernel_signature;
 
   // The ELF sections embed column and page information in their
   // names.  Extract the column and page information from the
@@ -587,37 +592,27 @@ class module_elf : public module_impl
     return { col, page };
   }
 
-  // Extract instruction buffer from ELF sections without assuming anything
-  // about order of sections in the ELF file.
-  instr_buf
-  initialize_instr_buf(const ELFIO::elfio& elf)
+  uint32_t
+  get_section_name_index(const std::string& name)
   {
-    instr_buf instrbuf;
-
-    for (const auto& sec : elf.sections) {
-      auto name = sec->get_name();
-      // Instruction buffer is in .ctrltext section.
-      if (name.find(patcher::section_name_to_string(patcher::buf_type::ctrltext)) == std::string::npos)
-        continue;
-      instrbuf.append_section_data(sec.get());
-      break;
-    }
-
-    return instrbuf;
+    // Elf_Amd_Aie2p has sections .sec_name
+    // Elf_Amd_Aie2p_config has sections .sec_name.*
+    auto pos = name.find_last_of(".");
+    return (pos == 0) ? 0 : std::stoul(name.substr(pos + 1, 1));
   }
 
   void
-  initialize_partition_size(const ELFIO::elfio& elf)
+  initialize_partition_size()
   {
     static constexpr const char* partition_section_name {".note.xrt.configuration"};
     // note 0 in .note.xrt.configuration section has partition size
     static constexpr ELFIO::Elf_Word partition_note_num = 0;
 
-    auto partition_section = elf.sections[partition_section_name];
+    auto partition_section = m_elfio.sections[partition_section_name];
     if (!partition_section)
       return; // elf doesn't have partition info section, partition size holds UINT32_MAX
 
-    ELFIO::note_section_accessor accessor(elf, partition_section);
+    ELFIO::note_section_accessor accessor(m_elfio, partition_section);
     ELFIO::Elf_Word type;
     std::string name;
     char* desc;
@@ -627,26 +622,102 @@ class module_elf : public module_impl
     m_partition_size = std::stoul(std::string{static_cast<char*>(desc), desc_size});
   }
 
+  void
+  initialize_kernel_signature()
+  {
+    static constexpr const char* symtab_section_name {".symtab"};
+
+    ELFIO::section* symtab = m_elfio.sections[symtab_section_name];
+    if (!symtab)
+      return; // elf doesn't have .symtab section, kernel_signature will be empty string
+
+    // Get the symbol table
+    const ELFIO::symbol_section_accessor symbols(m_elfio, symtab);
+    // Iterate over all symbols
+    for (ELFIO::Elf_Xword i = 0; i < symbols.get_symbols_num(); ++i) {
+      std::string name;
+      ELFIO::Elf64_Addr value;
+      ELFIO::Elf_Xword size;
+      unsigned char bind;
+      unsigned char type;
+      ELFIO::Elf_Half section_index;
+      unsigned char other;
+
+      // Read symbol data
+      symbols.get_symbol(i, name, value, size, bind, type, section_index, other);
+
+      // there will be only 1 kernel signature symbol entry in .symtab section whose
+      // type is FUNC
+      if (type == ELFIO::STT_FUNC) {
+        m_kernel_signature = demangle(name);
+        break;
+      }
+    }
+  }
+
+  // Extract buffer from ELF sections without assuming anything
+  // about order of sections in the ELF file.
+  template<typename buf_type>
+  void
+  initialize_buf(patcher::buf_type type, std::map<uint32_t, buf_type>& map)
+  {
+    for (const auto& sec : m_elfio.sections) {
+      auto name = sec->get_name();
+      buf_type buf;
+      // Instruction buffer is in .ctrltext.* section.
+      if (name.find(patcher::section_name_to_string(type)) == std::string::npos)
+        continue;
+      
+      uint32_t index = get_section_name_index(name);
+      buf.append_section_data(sec.get());
+      map.emplace(std::make_pair(index, buf));
+    }
+  }
+
+#if 0
+  // Extract instruction buffer from ELF sections without assuming anything
+  // about order of sections in the ELF file.
+  void
+  initialize_instr_buf()
+  {
+    for (const auto& sec : m_elfio.sections) {
+      auto name = sec->get_name();
+      instr_buf instrbuf;
+      // Instruction buffer is in .ctrltext.* section.
+      if (name.find(patcher::section_name_to_string(patcher::buf_type::ctrltext)) == std::string::npos)
+        continue;
+      
+      uint32_t index = get_section_name_index(name);
+      instrbuf.append_section_data(sec.get());
+      m_instr_buf_map.emplace({index, instrbuf});
+    }
+  }
+
   // Extract control-packet buffer from ELF sections without assuming anything
   // about order of sections in the ELF file.
-  bool initialize_ctrl_packet(const ELFIO::elfio& elf, control_packet& ctrlpacket)
+  void
+  initialize_ctrl_packet(const ELFIO::elfio& elf)
   {
     for (const auto& sec : elf.sections) {
       auto name = sec->get_name();
+      control_packet ctrlpacket;
+      // Instruction buffer is in .ctrldata.* section.
       if (name.find(patcher::section_name_to_string(patcher::buf_type::ctrldata)) == std::string::npos)
         continue;
 
+      uint32_t index = get_section_name_index(name);
       ctrlpacket.append_section_data(sec.get());
-      return true;
+      m_ctrl_packet_map.emplace({index, ctrlpacket});
     }
-    return false;
   }
+#endif
 
   // Extract preempt_save buffer from ELF sections
   // return true if section exist
-  bool initialize_save_buf(const ELFIO::elfio& elf, buf& save_buf)
+  bool
+  initialize_save_buf(buf& save_buf)
   {
-    for (const auto& sec : elf.sections) {
+    for (const auto& sec : m_elfio.sections) {
       auto name = sec->get_name();
       if (name.find(patcher::section_name_to_string(patcher::buf_type::preempt_save)) == std::string::npos)
         continue;
@@ -659,9 +730,10 @@ class module_elf : public module_impl
 
   // Extract preempt_restore buffer from ELF sections
   // return true if section exist
-  bool initialize_restore_buf(const ELFIO::elfio& elf, buf& restore_buf)
+  bool
+  initialize_restore_buf(buf& restore_buf)
   {
-    for (const auto& sec : elf.sections) {
+    for (const auto& sec : m_elfio.sections) {
       auto name = sec->get_name();
       if (name.find(patcher::section_name_to_string(patcher::buf_type::preempt_restore)) == std::string::npos)
         continue;
@@ -673,28 +745,30 @@ class module_elf : public module_impl
     return false;
   }
 
+#if 0
   // Extract pdi from ELF sections
-  // return true if section exist
-  bool initialize_pdi_buf(const ELFIO::elfio& elf, buf& pdi_buf)
+  void
+  initialize_pdi_buf(const ELFIO::elfio& elf)
   {
     for (const auto& sec : elf.sections) {
       auto name = sec->get_name();
+      buf pdi_buf;
       if (name.find(patcher::section_name_to_string(patcher::buf_type::pdi)) == std::string::npos)
         continue;
 
+      uint32_t index = get_section_name_index(name);
       pdi_buf.append_section_data(sec.get());
-      return true;
+      m_pdi_buf_map.emplace({index, pdi_buf});
     }
-
-    return false;
   }
+#endif
 
   // Extract control code from ELF sections without assuming anything
   // about order of sections in the ELF file.  Build helper data
   // structures that manages the control code data for each column and
   // page, then create ctrlcode objects from the data.
   std::vector<ctrlcode>
-  initialize_column_ctrlcode(const ELFIO::elfio& elf)
+  initialize_column_ctrlcode()
   {
     // Elf sections for a single page
     struct column_page
@@ -721,7 +795,7 @@ class module_elf : public module_impl
 
     // Iterate sections in elf, collect ctrltext and ctrldata
     // per column and page
-    for (const auto& sec : elf.sections) {
+    for (const auto& sec : m_elfio.sections) {
       auto name = sec->get_name();
       if (name.find(patcher::section_name_to_string(patcher::buf_type::ctrltext)) != std::string::npos) {
         auto [col, page] = get_column_and_page(sec->get_name());
@@ -758,11 +832,12 @@ class module_elf : public module_impl
   std::pair<size_t, patcher::buf_type>
   determine_section_type(const std::string& section_name)
   {
-   if (section_name == patcher::section_name_to_string(patcher::buf_type::ctrltext))
-     return { m_instr_buf.size(), patcher::buf_type::ctrltext};
+   if (section_name.find(patcher::section_name_to_string(patcher::buf_type::ctrltext)) != std::string::npos)
+     return { m_instr_buf_map[get_section_name_index(section_name)].size(), patcher::buf_type::ctrltext};
 
-   else if (m_ctrl_packet_exist && (section_name == patcher::section_name_to_string(patcher::buf_type::ctrldata)))
-     return { m_ctrl_packet.size(), patcher::buf_type::ctrldata};
+   else if (!m_ctrl_packet_map.empty() &&
+            section_name.find(patcher::section_name_to_string(patcher::buf_type::ctrldata)) != std::string::npos)
+     return { m_ctrl_packet_map[get_section_name_index(section_name)].size(), patcher::buf_type::ctrldata};
 
    else if (m_save_buf_exist && (section_name == patcher::section_name_to_string(patcher::buf_type::preempt_save)))
      return { m_save_buf.size(), patcher::buf_type::preempt_save };
@@ -770,91 +845,90 @@ class module_elf : public module_impl
    else if (m_restore_buf_exist && (section_name == patcher::section_name_to_string(patcher::buf_type::preempt_restore)))
      return { m_restore_buf.size(), patcher::buf_type::preempt_restore };
 
-   else if (m_pdi_buf_exist && (section_name == patcher::section_name_to_string(patcher::buf_type::pdi)))
-     return { m_pdi_buf.size(), patcher::buf_type::pdi };
+   else if (!m_pdi_buf_map.empty() &&
+            section_name.find(patcher::section_name_to_string(patcher::buf_type::pdi)) != std::string::npos)
+     return { m_pdi_buf_map[get_section_name_index(section_name)].size(), patcher::buf_type::pdi };
 
    else
      throw std::runtime_error("Invalid section name " + section_name);
   }
 
   std::map<std::string, patcher>
-  initialize_arg_patchers(const ELFIO::elfio& elf)
+  initialize_arg_patchers()
   {
-    auto dynsym = elf.sections[".dynsym"];
-    auto dynstr = elf.sections[".dynstr"];
+    auto dynsym = m_elfio.sections[".dynsym"];
+    auto dynstr = m_elfio.sections[".dynstr"];
+    auto dynsec = m_elfio.sections[".rela.dyn"];
+
+    if (!dynsym || !dynstr || !dynsec)
+      return {};
 
     std::map<std::string, patcher> arg2patchers;
+    auto name = dynsec->get_name();
 
-    for (const auto& sec : elf.sections) {
-      auto name = sec->get_name();
-      if (name.find(".rela.dyn") == std::string::npos)
-        continue;
+    // Iterate over all relocations and construct a patcher for each
+    // relocation that refers to a symbol in the .dynsym section.
+    auto begin = reinterpret_cast<const ELFIO::Elf32_Rela*>(dynsec->get_data());
+    auto end = begin + dynsec->get_size() / sizeof(const ELFIO::Elf32_Rela);
+    for (auto rela = begin; rela != end; ++rela) {
+      auto symidx = ELFIO::get_sym_and_type<ELFIO::Elf32_Rela>::get_r_sym(rela->r_info);
 
-      // Iterate over all relocations and construct a patcher for each
-      // relocation that refers to a symbol in the .dynsym section.
-      auto begin = reinterpret_cast<const ELFIO::Elf32_Rela*>(sec->get_data());
-      auto end = begin + sec->get_size() / sizeof(const ELFIO::Elf32_Rela);
-      for (auto rela = begin; rela != end; ++rela) {
-        auto symidx = ELFIO::get_sym_and_type<ELFIO::Elf32_Rela>::get_r_sym(rela->r_info);
+      auto dynsym_offset = symidx * sizeof(ELFIO::Elf32_Sym);
+      if (dynsym_offset >= dynsym->get_size())
+        throw std::runtime_error("Invalid symbol index " + std::to_string(symidx));
+      auto sym = reinterpret_cast<const ELFIO::Elf32_Sym*>(dynsym->get_data() + dynsym_offset);
 
-        auto dynsym_offset = symidx * sizeof(ELFIO::Elf32_Sym);
-        if (dynsym_offset >= dynsym->get_size())
-          throw std::runtime_error("Invalid symbol index " + std::to_string(symidx));
-        auto sym = reinterpret_cast<const ELFIO::Elf32_Sym*>(dynsym->get_data() + dynsym_offset);
+      auto dynstr_offset = sym->st_name;
+      if (dynstr_offset >= dynstr->get_size())
+        throw std::runtime_error("Invalid symbol name offset " + std::to_string(dynstr_offset));
+      auto symname = dynstr->get_data() + dynstr_offset;
 
-        auto dynstr_offset = sym->st_name;
-        if (dynstr_offset >= dynstr->get_size())
-          throw std::runtime_error("Invalid symbol name offset " + std::to_string(dynstr_offset));
-        auto symname = dynstr->get_data() + dynstr_offset;
+      if (!m_scratch_pad_mem_size && (strcmp(symname, Scratch_Pad_Mem_Symbol) == 0)) {
+        m_scratch_pad_mem_size = static_cast<size_t>(sym->st_size);
+      }
 
-        if (!m_scratch_pad_mem_size && (strcmp(symname, Scratch_Pad_Mem_Symbol) == 0)) {
-            m_scratch_pad_mem_size = static_cast<size_t>(sym->st_size);
-        }
+      // Get control code section referenced by the symbol, col, and page
+      auto section = m_elfio.sections[sym->st_shndx];
+      if (!section)
+        throw std::runtime_error("Invalid section index " + std::to_string(sym->st_shndx));
 
-        // Get control code section referenced by the symbol, col, and page
-        auto section = elf.sections[sym->st_shndx];
-        if (!section)
-          throw std::runtime_error("Invalid section index " + std::to_string(sym->st_shndx));
+      auto offset = rela->r_offset;
+      auto [sec_size, buf_type] = determine_section_type(section->get_name());
 
-        auto offset = rela->r_offset;
-        auto [sec_size, buf_type] = determine_section_type(section->get_name());
+      if (offset >= sec_size)
+        throw std::runtime_error("Invalid offset " + std::to_string(offset));
 
-        if (offset >= sec_size)
-          throw std::runtime_error("Invalid offset " + std::to_string(offset));
+      uint32_t add_end_higher_28bit = (rela->r_addend & addend_mask) >> addend_shift;
+      std::string argnm{ symname, symname + std::min(strlen(symname), dynstr->get_size()) };
 
-        uint32_t add_end_higher_28bit = (rela->r_addend & addend_mask) >> addend_shift;
-        std::string argnm{ symname, symname + std::min(strlen(symname), dynstr->get_size()) };
+      auto patch_scheme = static_cast<patcher::symbol_type>(rela->r_addend & schema_mask);
 
-        auto patch_scheme = static_cast<patcher::symbol_type>(rela->r_addend & schema_mask);
+      patcher::patch_info pi = patch_scheme == patcher::symbol_type::scalar_32bit_kind ?
+                               // st_size is is encoded using register value mask for scaler_32
+                               // for other pacthing scheme it is encoded using size of dma
+                               patcher::patch_info{ offset, add_end_higher_28bit, static_cast<uint32_t>(sym->st_size) } :
+                               patcher::patch_info{ offset, add_end_higher_28bit, 0 };
 
-        patcher::patch_info pi = patch_scheme == patcher::symbol_type::scalar_32bit_kind ?
-                                 // st_size is is encoded using register value mask for scaler_32
-                                 // for other pacthing scheme it is encoded using size of dma
-                                 patcher::patch_info{ offset, add_end_higher_28bit, static_cast<uint32_t>(sym->st_size) } :
-                                 patcher::patch_info{ offset, add_end_higher_28bit, 0 };
+      std::string key_string = generate_key_string(argnm, buf_type);
 
-        std::string key_string = generate_key_string(argnm, buf_type);
-
-        if (auto search = arg2patchers.find(key_string); search != arg2patchers.end())
-          search->second.m_ctrlcode_patchinfo.emplace_back(pi);
-        else {
-          arg2patchers.emplace(std::move(key_string), patcher{ patch_scheme, {pi}, buf_type});
-        }
+      if (auto search = arg2patchers.find(key_string); search != arg2patchers.end())
+        search->second.m_ctrlcode_patchinfo.emplace_back(pi);
+      else {
+        arg2patchers.emplace(std::move(key_string), patcher{ patch_scheme, {pi}, buf_type});
       }
     }
-
     return arg2patchers;
   }
 
   std::map<std::string, patcher>
-  initialize_arg_patchers(const ELFIO::elfio& elf, const std::vector<ctrlcode>& ctrlcodes)
+  initialize_arg_patchers(const std::vector<ctrlcode>& ctrlcodes)
   {
-    auto dynsym = elf.sections[".dynsym"];
-    auto dynstr = elf.sections[".dynstr"];
+    auto dynsym = m_elfio.sections[".dynsym"];
+    auto dynstr = m_elfio.sections[".dynstr"];
 
     std::map<std::string, patcher> arg2patcher;
 
-    for (const auto& sec : elf.sections) {
+    for (const auto& sec : m_elfio.sections) {
       auto name = sec->get_name();
       if (name.find(".rela.dyn") == std::string::npos)
         continue;
@@ -877,7 +951,7 @@ class module_elf : public module_impl
         auto symname = dynstr->get_data() + dynstr_offset;
 
         // Get control code section referenced by the symbol, col, and page
-        auto ctrl_sec = elf.sections[sym->st_shndx];
+        auto ctrl_sec = m_elfio.sections[sym->st_shndx];
         if (!ctrl_sec)
           throw std::runtime_error("Invalid section index " + std::to_string(sym->st_shndx));
         auto [col, page] = get_column_and_page(ctrl_sec->get_name());
@@ -955,7 +1029,7 @@ class module_elf : public module_impl
     if (m_os_abi != Elf_Amd_Aie2p)
       throw std::runtime_error("ELF os_abi Not supported");
 
-    if (m_pdi_buf_exist)
+    if (!m_pdi_buf_map.empty())
       return ERT_START_NPU_PDI_IN_ELF;
 
     if (m_save_buf_exist && m_restore_buf_exist)
@@ -967,28 +1041,38 @@ class module_elf : public module_impl
 public:
   explicit module_elf(xrt::elf elf)
     : module_impl{ elf.get_cfg_uuid() }
-    , m_elf(std::move(elf))
-    , m_os_abi{ xrt_core::elf_int::get_elfio(m_elf).get_os_abi() }
+    , m_elfio(xrt_core::elf_int::get_elfio(elf))
+    , m_os_abi(m_elfio.get_os_abi())
   {
     if (m_os_abi == Elf_Amd_Aie2ps) {
-      m_ctrlcodes = initialize_column_ctrlcode(xrt_core::elf_int::get_elfio(m_elf));
-      m_arg2patcher = initialize_arg_patchers(xrt_core::elf_int::get_elfio(m_elf), m_ctrlcodes);
+      m_ctrlcodes = initialize_column_ctrlcode();
+      m_arg2patcher = initialize_arg_patchers(m_ctrlcodes);
     }
     else if (m_os_abi == Elf_Amd_Aie2p) {
-      m_instr_buf = initialize_instr_buf(xrt_core::elf_int::get_elfio(m_elf));
-      m_ctrl_packet_exist = initialize_ctrl_packet(xrt_core::elf_int::get_elfio(m_elf), m_ctrl_packet);
+      initialize_buf(patcher::buf_type::ctrltext, m_instr_buf_map);
+      initialize_buf(patcher::buf_type::ctrldata, m_ctrl_packet_map);
 
-      m_save_buf_exist = initialize_save_buf(xrt_core::elf_int::get_elfio(m_elf), m_save_buf);
-      m_restore_buf_exist = initialize_restore_buf(xrt_core::elf_int::get_elfio(m_elf), m_restore_buf);
+      m_save_buf_exist = initialize_save_buf(m_save_buf);
+      m_restore_buf_exist = initialize_restore_buf(m_restore_buf);
       if (m_save_buf_exist != m_restore_buf_exist)
         throw std::runtime_error{ "Invalid elf because preempt save and restore is not paired" };
 
-      m_pdi_buf_exist = initialize_pdi_buf(xrt_core::elf_int::get_elfio(m_elf), m_pdi_buf);
-
-      m_arg2patcher = initialize_arg_patchers(xrt_core::elf_int::get_elfio(m_elf));
+      initialize_buf(patcher::buf_type::pdi, m_pdi_buf_map);
+      m_arg2patcher = initialize_arg_patchers();
     }
     else if (m_os_abi == Elf_Amd_Aie2p_config) {
-      initialize_partition_size(xrt_core::elf_int::get_elfio(m_elf));
+      initialize_partition_size();
+      initialize_kernel_signature();
+      initialize_buf(patcher::buf_type::ctrltext, m_instr_buf_map);
+      initialize_buf(patcher::buf_type::ctrldata, m_ctrl_packet_map);
+
+      m_save_buf_exist = initialize_save_buf(m_save_buf);
+      m_restore_buf_exist = initialize_restore_buf(m_restore_buf);
+      if (m_save_buf_exist != m_restore_buf_exist)
+        throw std::runtime_error{ "Invalid elf because preempt save and restore is not paired" };
+
+      initialize_buf(patcher::buf_type::pdi, m_pdi_buf_map);
+      m_arg2patcher = initialize_arg_patchers();
     }
   }
 
@@ -1001,7 +1085,7 @@ public:
   [[nodiscard]] const instr_buf&
   get_instr() const override
   {
-    return m_instr_buf;
+    return m_instr_buf_map.at(0);
   }
 
   [[nodiscard]] const buf&
@@ -1019,7 +1103,7 @@ public:
   [[nodiscard]] const buf&
       get_pdi() const override
   {
-      return m_pdi_buf;
+      return m_pdi_buf_map.at(0);
   }
 
   [[nodiscard]] virtual size_t
@@ -1031,7 +1115,7 @@ public:
   [[nodiscard]] const control_packet&
   get_ctrlpkt() const override
   {
-    return m_ctrl_packet;
+    return m_ctrl_packet_map.at(0);
   }
 
   [[nodiscard]] size_t
@@ -1047,6 +1131,15 @@ public:
       throw std::runtime_error("No partition info available, wrong ELF passed\n");
 
     return m_partition_size;
+  }
+
+  [[nodiscard]] virtual std::string
+  get_kernel_signature() const
+  {
+    if (m_kernel_signature.empty())
+      throw std::runtime_error("No kernel signature available, wrong ELF passed\n");
+  
+    return m_kernel_signature;
   }
 };
 
@@ -1604,7 +1697,6 @@ public:
     xrt_core::message::send(xrt_core::message::severity_level::debug, "xrt_module", msg);
   }
 };
-uint32_t module_sram::s_id = 0;
 
 } // namespace xrt
 
