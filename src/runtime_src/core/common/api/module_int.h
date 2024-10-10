@@ -21,8 +21,8 @@ namespace xrt_core::module_int {
 uint32_t*
 fill_ert_dpu_data(const xrt::module& module, uint32_t *payload);
 
-uint32_t*
-fill_ert_dpu_data_elf_flow(const xrt::module& module, uint32_t *payload);
+//uint32_t*
+//fill_ert_dpu_data_elf_flow(const xrt::module& module, uint32_t *payload);
 
 // Patch buffer object into control code at given argument
 XRT_CORE_COMMON_EXPORT

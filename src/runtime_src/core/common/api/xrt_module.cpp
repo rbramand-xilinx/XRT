@@ -50,7 +50,8 @@ static constexpr uint8_t Elf_Amd_Aie2p_config = 70;
 
 static const char* Scratch_Pad_Mem_Symbol = "scratch-pad-mem";
 static const char* Control_Packet_Symbol = "control-packet";
-static const char* pdi_symbol = "pdi0";
+//static const char* pdi_symbol = "pdi0";
+static const char* pdi_symbol = ".pdi.0";
 
 struct buf
 {
@@ -94,6 +95,13 @@ struct buf
       throw std::runtime_error("Invalid ELF section size");
 
     m_data.resize(pad);
+  }
+
+  static buf&
+  get_empty_buf()
+  {
+    static buf empty_buf;
+    return empty_buf;
   }
 };
 
@@ -353,7 +361,7 @@ public:
   }
 
   [[nodiscard]] virtual const instr_buf&
-  get_instr() const
+  get_instr(uint32_t index = 0) const
   {
     throw std::runtime_error("Not supported");
   }
@@ -371,7 +379,7 @@ public:
   }
 
   [[nodiscard]] virtual const buf&
-      get_pdi() const
+      get_pdi(uint32_t index = 0) const
   {
       throw std::runtime_error("Not supported");
   }
@@ -383,7 +391,7 @@ public:
   }
 
   [[nodiscard]] virtual const control_packet&
-  get_ctrlpkt() const
+  get_ctrlpkt(uint32_t index = 0) const
   {
     throw std::runtime_error("Not supported");
   }
@@ -409,11 +417,11 @@ public:
     throw std::runtime_error("Not supported");
   }
 
-  virtual uint32_t*
-  fill_ert_dpu_data_elf_flow(uint32_t *) const
-  {
-    throw std::runtime_error("Not supported");
-  }
+  //virtual uint32_t*
+  //fill_ert_dpu_data_elf_flow(uint32_t *) const
+  //{
+  //  throw std::runtime_error("Not supported");
+  //}
 
   [[nodiscard]] virtual uint8_t
   get_os_abi() const
@@ -1026,7 +1034,7 @@ class module_elf : public module_impl
     if (m_os_abi == Elf_Amd_Aie2ps)
       return ERT_START_DPU;
 
-    if (m_os_abi != Elf_Amd_Aie2p)
+    if (m_os_abi != Elf_Amd_Aie2p && m_os_abi != Elf_Amd_Aie2p_config)
       throw std::runtime_error("ELF os_abi Not supported");
 
     if (!m_pdi_buf_map.empty())
@@ -1083,39 +1091,45 @@ public:
   }
 
   [[nodiscard]] const instr_buf&
-  get_instr() const override
+  get_instr(uint32_t index) const override
   {
-    return m_instr_buf_map.at(0);
+    if (m_instr_buf_map.empty() || index >= m_instr_buf_map.size())
+      return buf::get_empty_buf();
+    return m_instr_buf_map.at(index);
   }
 
   [[nodiscard]] const buf&
-      get_preempt_save() const override
+  get_preempt_save() const override
   {
       return m_save_buf;
   }
 
   [[nodiscard]] const buf&
-      get_preempt_restore() const override
+  get_preempt_restore() const override
   {
       return m_restore_buf;
   }
 
   [[nodiscard]] const buf&
-      get_pdi() const override
+  get_pdi(uint32_t index) const override
   {
-      return m_pdi_buf_map.at(0);
+    if (m_pdi_buf_map.empty() || index >= m_pdi_buf_map.size())
+      return buf::get_empty_buf();
+    return m_pdi_buf_map.at(index);
   }
 
   [[nodiscard]] virtual size_t
-      get_scratch_pad_mem_size() const override
+  get_scratch_pad_mem_size() const override
   {
       return m_scratch_pad_mem_size;
   }
 
   [[nodiscard]] const control_packet&
-  get_ctrlpkt() const override
+  get_ctrlpkt(uint32_t index) const override
   {
-    return m_ctrl_packet_map.at(0);
+    if (m_ctrl_packet_map.empty() || index >= m_ctrl_packet_map.size())
+      return buf::get_empty_buf();
+    return m_ctrl_packet_map.at(index);
   }
 
   [[nodiscard]] size_t
@@ -1177,13 +1191,13 @@ public:
   }
 
   [[nodiscard]] const instr_buf&
-  get_instr() const override
+  get_instr(uint32_t /*index*/) const override
   {
     return m_instr_buf;
   }
 
   [[nodiscard]] const control_packet&
-  get_ctrlpkt() const override
+  get_ctrlpkt(uint32_t /*index*/) const override
   {
     return m_ctrl_pkt;
   }
@@ -1198,6 +1212,9 @@ class module_sram : public module_impl
 {
   std::shared_ptr<module_impl> m_parent;
   xrt::hw_context m_hwctx;
+  // New ELFs have multiple ctrl sections
+  // we need index to identify which ctrl section to pick from parent module
+  uint32_t m_index;
 
   // The instruction buffer object contains the ctrlcodes for each
   // column.  The ctrlcodes are concatenated into a single buffer
@@ -1308,7 +1325,7 @@ class module_sram : public module_impl
   create_instr_buf(const module_impl* parent)
   {
     XRT_DEBUGF("-> module_sram::create_instr_buf()\n");
-    const auto& data = parent->get_instr();
+    const auto& data = parent->get_instr(m_index);
     size_t sz = data.size();
     if (sz == 0)
       throw std::runtime_error("Invalid instruction buffer size");
@@ -1370,7 +1387,7 @@ class module_sram : public module_impl
       }
     }
 
-    const auto& pdi_data = parent->get_pdi();
+    const auto& pdi_data = parent->get_pdi(m_index);
     auto pdi_data_size = pdi_data.size();
 
     if (pdi_data_size > 0) {
@@ -1385,6 +1402,7 @@ class module_sram : public module_impl
             dump_bo(m_pdi_bo, dump_file_name);
         }
 
+	// TODO: patch all pdi addresses properly
         patch_instr(m_instr_bo, pdi_symbol, 0, m_pdi_bo, patcher::buf_type::ctrltext);
     }
 
@@ -1397,7 +1415,7 @@ class module_sram : public module_impl
   void
   create_ctrlpkt_buf(const module_impl* parent)
   {
-    const auto& data = parent->get_ctrlpkt();
+    const auto& data = parent->get_ctrlpkt(m_index);
     size_t sz = data.size();
 
     if (sz == 0) {
@@ -1454,7 +1472,7 @@ class module_sram : public module_impl
     index += 3;
 
     bool patched = false;
-    if (m_parent->get_os_abi() == Elf_Amd_Aie2p) {
+    if (m_parent->get_os_abi() == Elf_Amd_Aie2p || m_parent->get_os_abi() == Elf_Amd_Aie2p_config) {
       // patch control-packet buffer
       if (m_ctrlpkt_bo) {
         if (m_parent->patch(m_ctrlpkt_bo.map<uint8_t*>(), argnm, index, value, patcher::buf_type::ctrldata))
@@ -1516,7 +1534,7 @@ class module_sram : public module_impl
       }
       m_buffer.sync(XCL_BO_SYNC_BO_TO_DEVICE);
     }
-    else if (os_abi == Elf_Amd_Aie2p) {
+    else if (os_abi == Elf_Amd_Aie2p || os_abi == Elf_Amd_Aie2p_config) {
       m_instr_bo.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
       if (is_dump_control_codes()) {
@@ -1595,6 +1613,24 @@ class module_sram : public module_impl
   }
 
   uint32_t*
+  fill_ert_aie2p_config(uint32_t *payload) const
+  {
+    // npu preemption in elf_flow
+    auto npu = reinterpret_cast<ert_npu_preempt_data*>(payload);
+    npu->instruction_buffer = m_instr_bo.address();
+    npu->instruction_buffer_size = static_cast<uint32_t>(m_instr_bo.size());
+    npu->instruction_prop_count = 0; // Reserved for future use
+    if (m_preempt_save_bo && m_preempt_restore_bo) {
+      npu->save_buffer = m_preempt_save_bo.address();
+      npu->save_buffer_size = static_cast<uint32_t>(m_preempt_save_bo.size());
+      npu->restore_buffer = m_preempt_restore_bo.address();
+      npu->restore_buffer_size = static_cast<uint32_t>(m_preempt_restore_bo.size());
+    }
+    payload += sizeof(ert_npu_preempt_data) / sizeof(uint32_t);
+    return payload;
+  }
+
+  uint32_t*
   fill_ert_aie2ps(uint32_t *payload) const
   {
     auto ert_dpu_data_count = static_cast<uint32_t>(m_column_bo_address.size());
@@ -1614,10 +1650,11 @@ class module_sram : public module_impl
   }
 
 public:
-  module_sram(std::shared_ptr<module_impl> parent, xrt::hw_context hwctx)
+  module_sram(std::shared_ptr<module_impl> parent, xrt::hw_context hwctx, uint32_t index = 0)
     : module_impl{ parent->get_cfg_uuid() }
     , m_parent{ std::move(parent) }
     , m_hwctx{ std::move(hwctx) }
+    , m_index{ index }
   {
     if (xrt_core::config::get_xrt_debug()) {
       m_debug_mode.debug_flags.dump_control_codes = xrt_core::config::get_feature_toggle("Debug.dump_control_codes");
@@ -1629,8 +1666,8 @@ public:
 
     auto os_abi = m_parent.get()->get_os_abi();
 
-    if (os_abi == Elf_Amd_Aie2p) {
-      // make sure to create control-packet buffer frist because we may
+    if (os_abi == Elf_Amd_Aie2p || os_abi == Elf_Amd_Aie2p_config) {
+      // make sure to create control-packet buffer first because we may
       // need to patch control-packet address to instruction buffer
       create_ctrlpkt_buf(m_parent.get());
       create_instr_buf(m_parent.get());
@@ -1649,10 +1686,13 @@ public:
 
     if (os_abi == Elf_Amd_Aie2p)
       return fill_ert_aie2p(payload);
+    else if (os_abi == Elf_Amd_Aie2p_config)
+      return fill_ert_aie2p_config(payload);
 
     return fill_ert_aie2ps(payload);
   }
 
+#if 0
   uint32_t*
   fill_ert_dpu_data_elf_flow(uint32_t *payload) const override
   {
@@ -1670,6 +1710,7 @@ public:
     payload += sizeof(ert_npu_preempt_data) / sizeof(uint32_t);
     return payload;
   }
+#endif
 
   [[nodiscard]] virtual xrt::bo&
       get_scratch_pad_mem() override
@@ -1711,11 +1752,11 @@ fill_ert_dpu_data(const xrt::module& module, uint32_t* payload)
   return module.get_handle()->fill_ert_dpu_data(payload);
 }
 
-uint32_t*
-fill_ert_dpu_data_elf_flow(const xrt::module& module, uint32_t* payload)
-{
-  return module.get_handle()->fill_ert_dpu_data_elf_flow(payload);
-}
+//uint32_t*
+//fill_ert_dpu_data_elf_flow(const xrt::module& module, uint32_t* payload)
+//{
+//  return module.get_handle()->fill_ert_dpu_data_elf_flow(payload);
+//}
 
 void
 patch(const xrt::module& module, const std::string& argnm, size_t index, const xrt::bo& bo)
@@ -1730,7 +1771,7 @@ patch(const xrt::module& module, uint8_t* ibuf, size_t* sz, const std::vector<st
   size_t orig_sz = *sz;
   const buf* inst = nullptr;
 
-  if (hdl->get_os_abi() == Elf_Amd_Aie2p) {
+  if (hdl->get_os_abi() == Elf_Amd_Aie2p || Elf_Amd_Aie2p_config) {
     const auto& instr_buf = hdl->get_instr();
     inst = &instr_buf;
   }
