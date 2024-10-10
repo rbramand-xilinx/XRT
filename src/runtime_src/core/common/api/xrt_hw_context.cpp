@@ -183,6 +183,14 @@ public:
     return m_usage_logger.get();
   }
 
+  xrt::module
+  get_module(uint32_t index)
+  {
+    if (m_module_map.empty() || index >= m_module_map.size())
+      throw std::runtime_error("Invalid module index");
+    return m_module_map[index];
+  }
+
 #if 0
   xrt::xclbin::kernel
   get_kernel()
@@ -226,6 +234,12 @@ create_hw_context_from_implementation(void* hwctx_impl)
 
   auto impl_ptr = static_cast<xrt::hw_context_impl*>(hwctx_impl);
   return xrt::hw_context(impl_ptr->get_shared_ptr());
+}
+
+xrt::module
+get_module(const xrt::hw_context& ctx, uint32_t index)
+{
+  return ctx.get_handle()->get_module(index);
 }
 
 #if 0

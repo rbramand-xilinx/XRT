@@ -6,6 +6,7 @@
 #include "core/common/config.h"
 // This file defines implementation extensions to the XRT XCLBIN APIs.
 #include "core/include/experimental/xrt_hw_context.h"
+#include "core/include/experimental/xrt_module.h"
 
 #include <cstdint>
 
@@ -45,6 +46,9 @@ create_hw_context_from_implementation(void* hwctx_impl);
 
 xrt::xclbin::kernel
 get_kernel(const xrt::hw_context& hwctx);
+
+xrt::module
+get_module(const xrt::hw_context& hwctx, uint32_t index);
 
 }} // hw_context_int, xrt_core
 

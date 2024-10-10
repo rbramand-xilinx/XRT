@@ -1316,6 +1316,7 @@ private:
   size_t num_cumasks = 1;              // Required number of command cu masks
   control_type protocol = control_type::none; // Default opcode
   uint32_t uid;                        // Internal unique id for debug
+  uint32_t control_code_index = UINT32_MAX;
   std::shared_ptr<xrt_core::usage_metrics::base_logger> m_usage_logger =
       xrt_core::usage_metrics::get_usage_metrics_logger();
 
@@ -1599,14 +1600,14 @@ public:
     m_usage_logger->log_kernel_info(device->core_device.get(), hwctx, name, args.size());
   }
 
-  kernel_impl(std::shared_ptr<device_type> dev, xrt::hw_context ctx, xrt::module mod, const std::string& nm, int flag)
-    : name(nm.substr(0,nm.find(":")))                          // filter instance names
-    , device(std::move(dev))                                   // share ownership
+  kernel_impl(std::shared_ptr<device_type> dev, xrt::hw_context ctx, const std::string& nm, int flag)
+    //: name(nm.substr(0, nm.find(":")))                          // filter instance names
+    : device(std::move(dev))                                   // share ownership
     , ctxmgr(xrt_core::context_mgr::create(device->core_device.get())) // owership tied to kernel_impl
     , hwctx(std::move(ctx))                                    // hw context
     , hwqueue(hwctx)                                           // hw queue
 //  , hwqueue(device->get_core_device())                       // hw queue
-    , m_module{std::move(mod)}                                 // module if any
+    //, m_module{std::move(mod)}                                 // module if any
     , xclbin(hwctx.get_xclbin())                               // xclbin with kernel
     //, xkernel(get_kernel_or_error(xclbin, name))               // kernel meta data managed by xclbin
     //, properties(xrt_core::xclbin_int::get_properties(xkernel))// cache kernel properties
@@ -1618,6 +1619,17 @@ public:
 
     // xclbin elf use case, create kernel
     // get kernel signature from the module
+    // kernel name will be of format - <kernel_name>:<index>
+    auto i = nm.find(":");
+    control_code_index = 0;
+    if (i == std::string::npos) {
+      name = nm.substr(0, nm.size());
+    }
+    else {
+      name = nm.substr(0, i);
+      control_code_index = std::stoul(nm.substr(i+1, nm.size()-i-1));
+    }
+    m_module = xrt_core::hw_context_int::get_module(hwctx, control_code_index);
     auto demangled_name = xrt_core::module_int::get_kernel_signature(m_module);
       
     // extract kernel name
@@ -1625,7 +1637,9 @@ public:
     if (pos == std::string::npos)
       throw std::runtime_error("Failed to get kernel - " + nm);
 
-    name = demangled_name.substr(0, pos);
+    // ideally this check is not needed once elf flow is stabilized
+    if (name != demangled_name.substr(0, pos))
+      throw std::runtime_error("Kernel name mismatch, incorrect module picked\n");
 
     // extract kernel arguments
     size_t startPos = demangled_name.find('(');
@@ -1683,9 +1697,11 @@ public:
     : kernel_impl{std::move(dev), std::move(ctx), {}, nm}
   {}
 
+#if 0
   kernel_impl(std::shared_ptr<device_type> dev, xrt::hw_context ctx, const std::string& nm, int flag)
     : kernel_impl{std::move(dev), std::move(ctx), xrt_core::module_int::get_module(name), nm, flag}
   {}
+#endif
 
   std::shared_ptr<kernel_impl>
   get_shared_ptr()
@@ -2162,7 +2178,8 @@ class run_impl
     return payload;
   }
 
-    uint32_t*
+#if 0
+  uint32_t*
   initialize_dpu_elf_flow(uint32_t* payload)
   {
     payload = xrt_core::module_int::fill_ert_dpu_data_elf_flow(m_module, payload);
@@ -2170,6 +2187,7 @@ class run_impl
     // Return payload past the ert_dpu_data structures
     return payload;
   }
+#endif
 
   // Initialize the command packet with special case for DPU kernels
   uint32_t*
@@ -2177,14 +2195,9 @@ class run_impl
   {
     auto kcmd = pkt->get_ert_cmd<ert_start_kernel_cmd*>();
     auto payload = kernel->initialize_command(pkt);
-    if (kcmd->opcode == ERT_START_DPU || kcmd->opcode == ERT_START_NPU || kcmd->opcode == ERT_START_NPU_PREEMPT) {
+    if (kcmd->opcode == ERT_START_DPU || kcmd->opcode == ERT_START_NPU || kcmd->opcode == ERT_START_NPU_PREEMPT ||
+        kcmd->opcode == ERT_START_NPU_PDI_IN_ELF) {
       auto payload_past_dpu = initialize_dpu(payload);
-
-      // adjust count to include the prepended ert_dpu_data structures
-      kcmd->count += payload_past_dpu - payload;
-      payload = payload_past_dpu;
-    } else if (kcmd->opcode == ERT_START_NPU_PDI_IN_ELF) {
-      auto payload_past_dpu = initialize_dpu_elf_flow(payload);
 
       // adjust count to include the prepended ert_dpu_data structures
       kcmd->count += payload_past_dpu - payload;
@@ -3580,7 +3593,7 @@ alloc_kernel_from_name(const std::shared_ptr<device_type>& dev,
                        const xrt::hw_context& hwctx,
                        const std::string& name)
 {
-  return std::make_shared<xrt::kernel_impl>(dev, hwctx, xrt_core::module_int::get_module(name), name, true);
+  return std::make_shared<xrt::kernel_impl>(dev, hwctx, name, true);
 }
 
 static std::shared_ptr<xrt::mailbox_impl>
