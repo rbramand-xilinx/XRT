@@ -1706,7 +1706,9 @@ module::
 module(const xrt::elf& elf)
 : detail::pimpl<module_impl>{ std::make_shared<module_elf>(elf) }
 {
-  module_impl::m_module_map.emplace_back(*this);
+  if (module_impl::m_module_map.empty()) {
+    module_impl::m_module_map.emplace_back(*this);
+  }
 }
 
 module::

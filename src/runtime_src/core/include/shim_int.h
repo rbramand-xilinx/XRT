@@ -79,6 +79,9 @@ std::unique_ptr<xrt_core::hwctx_handle>
 create_hw_context(xclDeviceHandle handle,
                   const xrt::hw_context::temp_elf_type& elf);
 
+std::unique_ptr<xrt_core::hwctx_handle>
+create_hw_context(xclDeviceHandle handle, uint32_t partition_size);
+
 // get_hw_queue() -
 xrt_core::hwqueue_handle*
 get_hw_queue(xclDeviceHandle handle, xrt_core::hwctx_handle* ctxhdl);
