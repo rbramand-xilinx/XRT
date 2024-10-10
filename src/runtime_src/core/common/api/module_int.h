@@ -10,6 +10,8 @@
 #include "core/include/experimental/xrt_bo.h"
 #include "core/include/experimental/xrt_module.h"
 
+#include "ert.h"
+
 #include <string>
 
 namespace xrt_core::module_int {
@@ -52,6 +54,10 @@ get_module(const std::string& name);
 
 std::string
 get_kernel_signature(const xrt::module& module);
+
+// Get partition size if ELF has info
+uint32_t
+get_partition_size(const xrt::module& module);
 
 } // xrt_core::module_int
 
