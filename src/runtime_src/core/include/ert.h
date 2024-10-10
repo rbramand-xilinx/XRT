@@ -648,6 +648,7 @@ enum ert_cmd_opcode {
   ERT_CMD_CHAIN         = 19,
   ERT_START_NPU         = 20,
   ERT_START_NPU_PREEMPT = 21,
+  ERT_START_NPU_PDI_IN_ELF = 22,
 };
 
 /**
@@ -985,6 +986,11 @@ ert_valid_opcode(struct ert_packet *pkt)
     /* 1 mandatory cumask + extra_cu_masks + ert_npu_preempt_data */
     valid = (skcmd->count >= 1+ skcmd->extra_cu_masks + sizeof(struct ert_npu_preempt_data) / sizeof(uint32_t));
     break;
+   case ERT_START_NPU_PDI_IN_ELF:
+    skcmd = to_start_krnl_pkg(pkt);
+    /* 1 mandatory cumask + extra_cu_masks + ert_npu_preempt_data */
+    valid = (skcmd->count >= 1+ skcmd->extra_cu_masks + sizeof(struct ert_npu_preempt_data) / sizeof(uint32_t));
+    break;
   case ERT_START_KEY_VAL:
     skcmd = to_start_krnl_pkg(pkt);
     /* 1 cu mask */
@@ -1094,6 +1100,15 @@ get_ert_npu_preempt_data(struct ert_start_kernel_cmd* pkt)
   return (struct ert_npu_preempt_data*) (pkt->data + pkt->extra_cu_masks);
 }
 
+static inline struct ert_npu_preempt_data*
+get_ert_npu_elf_data(struct ert_start_kernel_cmd* pkt)
+{
+  if (pkt->opcode != ERT_START_NPU_PDI_IN_ELF)
+    return NULL;
+  // past extra cu_masks embedded in the packet data
+  return (struct ert_npu_preempt_data*) (pkt->data + pkt->extra_cu_masks);
+}
+
 static inline uint32_t*
 get_ert_regmap_begin(struct ert_start_kernel_cmd* pkt)
 {
@@ -1111,6 +1126,11 @@ get_ert_regmap_begin(struct ert_start_kernel_cmd* pkt)
     return pkt->data + pkt->extra_cu_masks
       + sizeof(struct ert_npu_preempt_data) / sizeof(uint32_t)
       + get_ert_npu_preempt_data(pkt)->instruction_prop_count;
+
+  case ERT_START_NPU_PDI_IN_ELF:
+    return pkt->data + pkt->extra_cu_masks
+      + sizeof(struct ert_npu_preempt_data) / sizeof(uint32_t)
+      + get_ert_npu_elf_data(pkt)->instruction_prop_count;
 
   default:
     // skip past embedded extra cu_masks

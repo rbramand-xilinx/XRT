@@ -1638,8 +1638,8 @@ public:
     std::vector<std::string> argstrings = split(argstring, ',');
 
     // set cu_mask as 0x1, this should be removed once we use new firmware
-    unsigned int cu_idx = 0;
-    cumask.set(cu_idx);
+    unsigned int cu_idx = 0;// to be REMOVED
+    cumask.set(cu_idx);// to be REMOVED
 
     size_t count = 0;
     size_t offset = 0;
@@ -2162,21 +2162,34 @@ class run_impl
     return payload;
   }
 
+    uint32_t*
+  initialize_dpu_elf_flow(uint32_t* payload)
+  {
+    payload = xrt_core::module_int::fill_ert_dpu_data_elf_flow(m_module, payload);
+
+    // Return payload past the ert_dpu_data structures
+    return payload;
+  }
+
   // Initialize the command packet with special case for DPU kernels
   uint32_t*
   initialize_command(kernel_command* pkt)
   {
     auto kcmd = pkt->get_ert_cmd<ert_start_kernel_cmd*>();
     auto payload = kernel->initialize_command(pkt);
-
     if (kcmd->opcode == ERT_START_DPU || kcmd->opcode == ERT_START_NPU || kcmd->opcode == ERT_START_NPU_PREEMPT) {
       auto payload_past_dpu = initialize_dpu(payload);
 
       // adjust count to include the prepended ert_dpu_data structures
       kcmd->count += payload_past_dpu - payload;
       payload = payload_past_dpu;
-    }
+    } else if (kcmd->opcode == ERT_START_NPU_PDI_IN_ELF) {
+      auto payload_past_dpu = initialize_dpu_elf_flow(payload);
 
+      // adjust count to include the prepended ert_dpu_data structures
+      kcmd->count += payload_past_dpu - payload;
+      payload = payload_past_dpu;
+    }
     return payload;
   }
 
