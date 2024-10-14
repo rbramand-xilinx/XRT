@@ -85,6 +85,7 @@ xassert(const std::string& file, const std::string& line, const std::string& fun
 
 } // xrt_core
 
+#define XRT_VERBOSE
 #ifdef XRT_VERBOSE
 # define XRT_DEBUG(...) xrt_core::debug(__VA_ARGS__) // NOLINT
 # define XRT_PRINT(...) xrt_core::debug(__VA_ARGS__) // NOLINT

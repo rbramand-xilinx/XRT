@@ -235,6 +235,7 @@ struct patcher
 
   void patch_shim48(uint32_t* bd_data_ptr, uint64_t patch)
   {
+    std::cout << "[rahul] : inside " << __func__ << " patching addr 0x" << std::hex << bd_data_ptr << " and value " << std::hex << patch << std::endl;
     // This patching scheme is originated from NPU firmware
     constexpr uint64_t ddr_aie_addr_offset = 0x80000000;
 
@@ -242,9 +243,16 @@ struct patcher
       ((static_cast<uint64_t>(bd_data_ptr[2]) & 0xFFF) << 32) |                       // NOLINT
       ((static_cast<uint64_t>(bd_data_ptr[1])));
 
+    std::cout << "--- base addr before adding patch - " << std::hex << base_address << std::endl;
+
     base_address = base_address + patch + ddr_aie_addr_offset;
+    std::cout << "--- base addr after adding patch - " << std::hex << base_address << std::endl;
+    std::cout << "[rahul] : before bd_data_ptr[1] - " << std::hex << bd_data_ptr[1] << std::endl;
+    std::cout << "[rahul] : before bd_data_ptr[2] - " << std::hex << bd_data_ptr[2] << std::endl;
     bd_data_ptr[1] = (uint32_t)(base_address & 0xFFFFFFFC);                           // NOLINT
     bd_data_ptr[2] = (bd_data_ptr[2] & 0xFFFF0000) | (base_address >> 32);            // NOLINT
+    std::cout << "[rahul] : after bd_data_ptr[1] - " << std::hex << bd_data_ptr[1] << std::endl;
+    std::cout << "[rahul] : after bd_data_ptr[2] - " << std::hex << bd_data_ptr[2] << std::endl;
   }
 
   void
@@ -252,6 +260,8 @@ struct patcher
   {
     for (auto item : m_ctrlcode_patchinfo) {
       auto bd_data_ptr = reinterpret_cast<uint32_t*>(base + item.offset_to_patch_buffer);
+      std::cout << "[rahul] : inside - " << __func__ << "base - " << std::hex << " bd_data_ptr - " << std::hex << bd_data_ptr << std::endl;
+      std::cout << "--- inside patch of patcher bd_data_ptr : " << std::hex << bd_data_ptr << std::endl;
       switch (m_symbol_type) {
       case symbol_type::address_64:
           // new_value is a 64bit address
@@ -276,6 +286,7 @@ struct patcher
         break;
       case symbol_type::shim_dma_48:
         // new_value is a bo address
+	std::cout << "[rahul] : new_value - " << new_value << " offset - " << std::hex << item.offset_to_base_bo_addr << std::endl;
         patch_shim48(bd_data_ptr, new_value + item.offset_to_base_bo_addr);
         break;
       default:
@@ -871,6 +882,10 @@ class module_elf : public module_impl
     if (!dynsym || !dynstr || !dynsec)
       return {};
 
+    std::ofstream ofs("arg_patchers.txt");
+    if (!ofs.is_open())
+      throw std::runtime_error("Failed to open file arg_patchers.txt for writing");
+
     std::map<std::string, patcher> arg2patchers;
     auto name = dynsec->get_name();
 
@@ -924,6 +939,10 @@ class module_elf : public module_impl
       else {
         arg2patchers.emplace(std::move(key_string), patcher{ patch_scheme, {pi}, buf_type});
       }
+
+      ofs << "patch_scheme: " << static_cast<int>(patch_scheme) << " buf_type : " << static_cast<int>(buf_type) << " \t";
+      ofs << "key_string: " << key_string << " offset: " << offset << " add_end_higher_28bit: " << add_end_higher_28bit << " size: " << sym->st_size << std::endl;
+
     }
     return arg2patchers;
   }
@@ -995,6 +1014,15 @@ class module_elf : public module_impl
   bool
   patch(uint8_t* base, const std::string& argnm, size_t index, uint64_t patch, patcher::buf_type type) override
   {
+    std::ofstream out_file("patch_info.txt", std::ios_base::app);
+    if (!out_file.is_open()) {
+	    throw std::runtime_error("failed to open patch file\n");
+    }
+
+    uint32_t* p_p = reinterpret_cast<uint32_t*>(base);
+
+    std::cout << "rahul -- inside " << __func__ << " patching - " << patch << " with argnm - " << argnm << " with index - " << index << " base - " << std::hex << p_p <<std::endl;
+
     const std::string key_string = generate_key_string(argnm, type);
     auto it = m_arg2patcher.find(key_string);
     auto not_found_use_argument_name = (it == m_arg2patcher.end());
@@ -1010,13 +1038,15 @@ class module_elf : public module_impl
     if (xrt_core::config::get_xrt_debug()) {
       if (not_found_use_argument_name) {
         std::stringstream ss;
-        ss << "Patched " << patcher::section_name_to_string(type) << " using argument index " << index << " with value " << std::hex << patch;
+        ss << "Patched " << patcher::section_name_to_string(type) << " using argument index " << index << " with value " << std::hex << patch << " at base - " << std::hex << p_p << std::endl;
         xrt_core::message::send( xrt_core::message::severity_level::debug, "xrt_module", ss.str());
+	out_file << ss.str() << std::endl;
       }
       else {
         std::stringstream ss;
         ss << "Patched " << patcher::section_name_to_string(type) << " using argument name " << argnm << " with value " << std::hex << patch;
         xrt_core::message::send( xrt_core::message::severity_level::debug, "xrt_module", ss.str());
+	out_file << ss.str() << std::endl;
       }
     }
     return true;
@@ -1338,6 +1368,7 @@ class module_sram : public module_impl
 
     if (is_dump_control_codes()) {
       std::string dump_file_name = "ctr_codes_pre_patch" + std::to_string(get_id()) + ".bin";
+      std::cout << "[rahul] : instr bo addr - " << std::hex << m_instr_bo.address() << std::endl;
       dump_bo(m_instr_bo, dump_file_name);
 
       std::stringstream ss;
@@ -1479,6 +1510,7 @@ class module_sram : public module_impl
           patched = true;
       }
 
+      std::cout << "--- instr bo addr - " << std::hex << m_instr_bo.address() << std::endl;
       // patch instruction buffer
       if (m_parent->patch(m_instr_bo.map<uint8_t*>(), argnm, index, value, patcher::buf_type::ctrltext))
           patched = true;
