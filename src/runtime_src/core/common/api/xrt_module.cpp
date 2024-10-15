@@ -96,13 +96,6 @@ struct buf
 
     m_data.resize(pad);
   }
-
-  static buf&
-  get_empty_buf()
-  {
-    static buf empty_buf;
-    return empty_buf;
-  }
 };
 
 using instr_buf = buf;
@@ -176,7 +169,7 @@ struct patcher
     *(data_to_patch + 1) = static_cast<uint32_t>((addr >> 32) & 0xffffffff);
   }
   
-// Replace certain bits of *data_to_patch with register_value. Which bits to be replaced is specified by mask
+  // Replace certain bits of *data_to_patch with register_value. Which bits to be replaced is specified by mask
   // For     *data_to_patch be 0xbb11aaaa and mask be 0x00ff0000
   // To make *data_to_patch be 0xbb55aaaa, register_value must be 0x00550000
   void
@@ -297,10 +290,10 @@ dump_bo(xrt::bo& bo, const std::string& filename)
 }
 
 XRT_CORE_UNUSED std::string
-generate_key_string(const std::string& argument_name, patcher::buf_type type)
+generate_key_string(const std::string& argument_name, patcher::buf_type type, uint32_t index)
 {
   std::string buf_string = std::to_string(static_cast<int>(type));
-  return argument_name + buf_string;
+  return argument_name + buf_string + std::to_string(index);
 }
 
 static std::string
@@ -343,8 +336,6 @@ public:
   module_impl& operator=(const module_impl&) = delete;
   module_impl& operator=(module_impl&&) = delete;
 
-  static std::vector<xrt::module> m_module_map;
-
   [[nodiscard]] xrt::uuid
   get_cfg_uuid() const
   {
@@ -360,37 +351,37 @@ public:
     throw std::runtime_error("Not supported");
   }
 
-  [[nodiscard]] virtual const instr_buf&
+  [[nodiscard]] virtual std::pair<uint32_t, instr_buf>
   get_instr(uint32_t index = 0) const
   {
     throw std::runtime_error("Not supported");
   }
 
-  [[nodiscard]] virtual const buf&
-      get_preempt_save() const
+  [[nodiscard]] virtual std::pair<uint32_t, buf>
+  get_preempt_save() const
   {
-      throw std::runtime_error("Not supported");
+    throw std::runtime_error("Not supported");
   }
 
-  [[nodiscard]] virtual const buf&
-      get_preempt_restore() const
+  [[nodiscard]] virtual std::pair<uint32_t, buf>
+  get_preempt_restore() const
   {
-      throw std::runtime_error("Not supported");
+    throw std::runtime_error("Not supported");
   }
 
-  [[nodiscard]] virtual const buf&
-      get_pdi(uint32_t index = 0) const
+  [[nodiscard]] virtual std::pair<uint32_t, buf>
+  get_pdi(uint32_t index = 0) const
   {
-      throw std::runtime_error("Not supported");
+    throw std::runtime_error("Not supported");
   }
 
   [[nodiscard]] virtual size_t
-      get_scratch_pad_mem_size() const
+  get_scratch_pad_mem_size() const
   {
-      throw std::runtime_error("Not supported");
+    throw std::runtime_error("Not supported");
   }
 
-  [[nodiscard]] virtual const control_packet&
+  [[nodiscard]] virtual std::pair<uint32_t, control_packet>
   get_ctrlpkt(uint32_t index = 0) const
   {
     throw std::runtime_error("Not supported");
@@ -436,8 +427,9 @@ public:
   // @param index - argument index
   // @param bo - global argument to patch into ctrlcode
   // @param buf_type - whether it is control-code, control-packet, preempt-save or preempt-restore
+  // @param sec_index - index of section to be patched
   virtual void
-  patch_instr(xrt::bo&, const std::string&, size_t, const xrt::bo&, patcher::buf_type)
+  patch_instr(xrt::bo&, const std::string&, size_t, const xrt::bo&, patcher::buf_type, uint32_t)
   {
     throw std::runtime_error("Not supported ");
   }
@@ -471,9 +463,10 @@ public:
   // @param index - argument index
   // @param patch - patch value
   // @param buf_type - whether it is control-code, control-packet, preempt-save or preempt-restore
-  // @Return true if symbol was patched, false otherwise  //
+  // @param sec_index - index of section to be patched
+  // @Return true if symbol was patched, false otherwise
   virtual bool
-  patch(uint8_t*, const std::string&, size_t, uint64_t, patcher::buf_type)
+  patch(uint8_t*, const std::string&, size_t, uint64_t, patcher::buf_type, uint32_t)
   {
     throw std::runtime_error("Not supported");
   }
@@ -543,9 +536,6 @@ public:
   }
 };
 
-std::vector<xrt::module>
-module_impl::m_module_map;
-
 // class module_elf - Elf provided by application
 //
 // Construct a module from a ELF file provided by the application.
@@ -566,17 +556,28 @@ class module_elf : public module_impl
   constexpr static uint32_t addend_shift = 4;
   constexpr static uint32_t addend_mask = ~((uint32_t)0) << addend_shift;
   constexpr static uint32_t schema_mask = ~addend_mask;
+
   const ELFIO::elfio& m_elfio; // we should not modify underlying elf
   uint8_t m_os_abi = Elf_Amd_Aie2p;
-  std::vector<ctrlcode> m_ctrlcodes;
   std::map<std::string, patcher> m_arg2patcher;
-  std::map<uint32_t, instr_buf> m_instr_buf_map;
-  std::map<uint32_t, control_packet> m_ctrl_packet_map;
+
+  std::vector<ctrlcode> m_ctrlcodes;
+
+  // New ELFs of Aie2p contain multiple ctrltext, ctrldata  and PDI sections
+  // sections will be of format .ctrltext.* where .* has index of that section type
+  // Below maps has this index as key and value is pair of <section index, data buffer>
+  std::map<uint32_t, std::pair<uint32_t, instr_buf>> m_instr_buf_map;
+  std::map<uint32_t, std::pair<uint32_t, control_packet>> m_ctrl_packet_map;
+  std::map<uint32_t, std::pair<uint32_t, buf>> m_pdi_buf_map;
+
   buf m_save_buf;
+  uint32_t m_save_buf_sec_idx = UINT32_MAX;
   bool m_save_buf_exist = false;
+
   buf m_restore_buf;
+  uint32_t m_restore_buf_sec_idx = UINT32_MAX;
   bool m_restore_buf_exist = false;
-  std::map<uint32_t, buf> m_pdi_buf_map;
+  
   size_t m_scratch_pad_mem_size = 0;
   uint32_t m_partition_size = UINT32_MAX;
   std::string m_kernel_signature;
@@ -667,10 +668,11 @@ class module_elf : public module_impl
   // about order of sections in the ELF file.
   template<typename buf_type>
   void
-  initialize_buf(patcher::buf_type type, std::map<uint32_t, buf_type>& map)
+  initialize_buf(patcher::buf_type type, std::map<uint32_t, std::pair<uint32_t, buf_type>>& map)
   {
     for (const auto& sec : m_elfio.sections) {
       auto name = sec->get_name();
+      auto sec_index = sec->get_index();
       buf_type buf;
       // Instruction buffer is in .ctrltext.* section.
       if (name.find(patcher::section_name_to_string(type)) == std::string::npos)
@@ -678,7 +680,7 @@ class module_elf : public module_impl
       
       uint32_t index = get_section_name_index(name);
       buf.append_section_data(sec.get());
-      map.emplace(std::make_pair(index, buf));
+      map.emplace(std::make_pair(index, std::make_pair(sec_index, buf)));
     }
   }
 
@@ -731,6 +733,7 @@ class module_elf : public module_impl
         continue;
 
       save_buf.append_section_data(sec.get());
+      m_save_buf_sec_idx = sec->get_index();
       return true;
     }
     return false;
@@ -747,6 +750,7 @@ class module_elf : public module_impl
         continue;
 
       restore_buf.append_section_data(sec.get());
+      m_restore_buf_sec_idx = sec->get_index();
       return true;
     }
 
@@ -840,25 +844,37 @@ class module_elf : public module_impl
   std::pair<size_t, patcher::buf_type>
   determine_section_type(const std::string& section_name)
   {
-   if (section_name.find(patcher::section_name_to_string(patcher::buf_type::ctrltext)) != std::string::npos)
-     return { m_instr_buf_map[get_section_name_index(section_name)].size(), patcher::buf_type::ctrltext};
+    if (section_name.find(patcher::section_name_to_string(patcher::buf_type::ctrltext)) != std::string::npos) {
+      auto index = get_section_name_index(section_name);
+      if (index >= m_instr_buf_map.size())
+        throw std::runtime_error("Invalid section passed, section info is not cached\n");
+      return { m_instr_buf_map[index].second.size(), patcher::buf_type::ctrltext};
+    }
 
-   else if (!m_ctrl_packet_map.empty() &&
-            section_name.find(patcher::section_name_to_string(patcher::buf_type::ctrldata)) != std::string::npos)
-     return { m_ctrl_packet_map[get_section_name_index(section_name)].size(), patcher::buf_type::ctrldata};
+    else if (!m_ctrl_packet_map.empty() &&
+             section_name.find(patcher::section_name_to_string(patcher::buf_type::ctrldata)) != std::string::npos) {
+      auto index = get_section_name_index(section_name);
+      if (index >= m_ctrl_packet_map.size())
+        throw std::runtime_error("Invalid section passed, section info is not cached\n");
+      return { m_ctrl_packet_map[index].second.size(), patcher::buf_type::ctrldata};
+    }
 
-   else if (m_save_buf_exist && (section_name == patcher::section_name_to_string(patcher::buf_type::preempt_save)))
-     return { m_save_buf.size(), patcher::buf_type::preempt_save };
+    else if (m_save_buf_exist && (section_name == patcher::section_name_to_string(patcher::buf_type::preempt_save)))
+      return { m_save_buf.size(), patcher::buf_type::preempt_save };
 
-   else if (m_restore_buf_exist && (section_name == patcher::section_name_to_string(patcher::buf_type::preempt_restore)))
-     return { m_restore_buf.size(), patcher::buf_type::preempt_restore };
+    else if (m_restore_buf_exist && (section_name == patcher::section_name_to_string(patcher::buf_type::preempt_restore)))
+      return { m_restore_buf.size(), patcher::buf_type::preempt_restore };
 
-   else if (!m_pdi_buf_map.empty() &&
-            section_name.find(patcher::section_name_to_string(patcher::buf_type::pdi)) != std::string::npos)
-     return { m_pdi_buf_map[get_section_name_index(section_name)].size(), patcher::buf_type::pdi };
+    else if (!m_pdi_buf_map.empty() &&
+             section_name.find(patcher::section_name_to_string(patcher::buf_type::pdi)) != std::string::npos) {
+      auto index = get_section_name_index(section_name);
+      if (index >= m_pdi_buf_map.size())
+        throw std::runtime_error("Invalid section passed, section info is not cached\n");
+      return { m_pdi_buf_map[index].second.size(), patcher::buf_type::pdi };
+    }
 
-   else
-     throw std::runtime_error("Invalid section name " + section_name);
+    else
+      throw std::runtime_error("Invalid section name " + section_name);
   }
 
   std::map<std::string, patcher>
@@ -902,6 +918,7 @@ class module_elf : public module_impl
 
       auto offset = rela->r_offset;
       auto [sec_size, buf_type] = determine_section_type(section->get_name());
+      auto sec_index = section->get_index();
 
       if (offset >= sec_size)
         throw std::runtime_error("Invalid offset " + std::to_string(offset));
@@ -917,7 +934,7 @@ class module_elf : public module_impl
                                patcher::patch_info{ offset, add_end_higher_28bit, static_cast<uint32_t>(sym->st_size) } :
                                patcher::patch_info{ offset, add_end_higher_28bit, 0 };
 
-      std::string key_string = generate_key_string(argnm, buf_type);
+      std::string key_string = generate_key_string(argnm, buf_type, sec_index);
 
       if (auto search = arg2patchers.find(key_string); search != arg2patchers.end())
         search->second.m_ctrlcode_patchinfo.emplace_back(pi);
@@ -985,7 +1002,7 @@ class module_elf : public module_impl
         patcher::buf_type buf_type = patcher::buf_type::ctrltext;
 
         auto symbol_type = static_cast<patcher::symbol_type>(rela->r_addend);
-        arg2patcher.emplace(std::move(generate_key_string(argnm, buf_type)), patcher{ symbol_type, {{ctrlcode_offset, 0}}, buf_type});
+        arg2patcher.emplace(std::move(generate_key_string(argnm, buf_type, UINT32_MAX)), patcher{ symbol_type, {{ctrlcode_offset, 0}}, buf_type});
       }
     }
 
@@ -993,14 +1010,15 @@ class module_elf : public module_impl
   }
 
   bool
-  patch(uint8_t* base, const std::string& argnm, size_t index, uint64_t patch, patcher::buf_type type) override
+  patch(uint8_t* base, const std::string& argnm, size_t index, uint64_t patch,
+        patcher::buf_type type, uint32_t sec_index) override
   {
-    const std::string key_string = generate_key_string(argnm, type);
+    const std::string key_string = generate_key_string(argnm, type, sec_index);
     auto it = m_arg2patcher.find(key_string);
     auto not_found_use_argument_name = (it == m_arg2patcher.end());
     if (not_found_use_argument_name) {// Search using index
       auto index_string = std::to_string(index);
-      const std::string key_index_string = generate_key_string(index_string, type);
+      const std::string key_index_string = generate_key_string(index_string, type, sec_index);
       it = m_arg2patcher.find(key_index_string);
       if (it == m_arg2patcher.end())
         return false;
@@ -1090,31 +1108,31 @@ public:
     return m_ctrlcodes;
   }
 
-  [[nodiscard]] const instr_buf&
+  [[nodiscard]] std::pair<uint32_t, instr_buf>
   get_instr(uint32_t index) const override
   {
     if (m_instr_buf_map.empty() || index >= m_instr_buf_map.size())
-      return buf::get_empty_buf();
+      return std::make_pair(UINT32_MAX, instr_buf{});
     return m_instr_buf_map.at(index);
   }
 
-  [[nodiscard]] const buf&
+  [[nodiscard]] std::pair<uint32_t, buf>
   get_preempt_save() const override
   {
-      return m_save_buf;
+    return {m_save_buf_sec_idx, m_save_buf};
   }
 
-  [[nodiscard]] const buf&
+  [[nodiscard]] std::pair<uint32_t, buf>
   get_preempt_restore() const override
   {
-      return m_restore_buf;
+      return {m_restore_buf_sec_idx, m_restore_buf};
   }
 
-  [[nodiscard]] const buf&
+  [[nodiscard]] std::pair<uint32_t, buf>
   get_pdi(uint32_t index) const override
   {
     if (m_pdi_buf_map.empty() || index >= m_pdi_buf_map.size())
-      return buf::get_empty_buf();
+      return std::make_pair(UINT32_MAX, buf{});
     return m_pdi_buf_map.at(index);
   }
 
@@ -1124,11 +1142,11 @@ public:
       return m_scratch_pad_mem_size;
   }
 
-  [[nodiscard]] const control_packet&
+  [[nodiscard]] std::pair<uint32_t, control_packet>
   get_ctrlpkt(uint32_t index) const override
   {
     if (m_ctrl_packet_map.empty() || index >= m_ctrl_packet_map.size())
-      return buf::get_empty_buf();
+      return std::make_pair(UINT32_MAX, control_packet{});
     return m_ctrl_packet_map.at(index);
   }
 
@@ -1190,16 +1208,16 @@ public:
     return m_ctrlcode;
   }
 
-  [[nodiscard]] const instr_buf&
+  [[nodiscard]] std::pair<uint32_t, instr_buf>
   get_instr(uint32_t /*index*/) const override
   {
-    return m_instr_buf;
+    return {0, m_instr_buf};
   }
 
-  [[nodiscard]] const control_packet&
+  [[nodiscard]] std::pair<uint32_t, control_packet>
   get_ctrlpkt(uint32_t /*index*/) const override
   {
-    return m_ctrl_pkt;
+    return {0, m_ctrl_pkt};
   }
 };
 
@@ -1226,6 +1244,9 @@ class module_sram : public module_impl
   xrt::bo m_preempt_save_bo;
   xrt::bo m_preempt_restore_bo;
   xrt::bo m_pdi_bo;
+
+  uint32_t m_instr_sec_idx;
+  uint32_t m_ctrlpkt_sec_idx;
 
   // Column bo address is the address of the ctrlcode for each column
   // in the (sram) buffer object.  The first ctrlcode is at the base
@@ -1325,7 +1346,8 @@ class module_sram : public module_impl
   create_instr_buf(const module_impl* parent)
   {
     XRT_DEBUGF("-> module_sram::create_instr_buf()\n");
-    const auto& data = parent->get_instr(m_index);
+    instr_buf data;
+    std::tie(m_instr_sec_idx, data) = parent->get_instr(m_index);
     size_t sz = data.size();
     if (sz == 0)
       throw std::runtime_error("Invalid instruction buffer size");
@@ -1345,10 +1367,10 @@ class module_sram : public module_impl
       xrt_core::message::send(xrt_core::message::severity_level::debug, "xrt_module", ss.str());
     }
 
-    const auto& preempt_save_data = parent->get_preempt_save();
+    auto [save_sec_idx, preempt_save_data] = parent->get_preempt_save();
     auto preempt_save_data_size = preempt_save_data.size();
 
-    const auto& preempt_restore_data = parent->get_preempt_restore();
+    auto [restore_sec_idx, preempt_restore_data] = parent->get_preempt_restore();
     auto preempt_restore_data_size = preempt_restore_data.size();
 
     if ((preempt_save_data_size > 0) && (preempt_restore_data_size > 0)) {
@@ -1377,8 +1399,10 @@ class module_sram : public module_impl
 
     if ((preempt_save_data_size > 0) && (preempt_restore_data_size > 0)) {
       m_scratch_pad_mem = xrt::ext::bo{ m_hwctx, m_parent->get_scratch_pad_mem_size() };
-      patch_instr(m_preempt_save_bo, Scratch_Pad_Mem_Symbol, 0, m_scratch_pad_mem, patcher::buf_type::preempt_save);
-      patch_instr(m_preempt_restore_bo, Scratch_Pad_Mem_Symbol, 0, m_scratch_pad_mem, patcher::buf_type::preempt_restore);
+      patch_instr(m_preempt_save_bo, Scratch_Pad_Mem_Symbol, 0, m_scratch_pad_mem,
+                  patcher::buf_type::preempt_save, save_sec_idx);
+      patch_instr(m_preempt_restore_bo, Scratch_Pad_Mem_Symbol, 0, m_scratch_pad_mem,
+                  patcher::buf_type::preempt_restore, restore_sec_idx);
 
       if (is_dump_preemption_codes()) {
         std::stringstream ss;
@@ -1387,27 +1411,28 @@ class module_sram : public module_impl
       }
     }
 
-    const auto& pdi_data = parent->get_pdi(m_index);
+    auto pdi_info = parent->get_pdi(m_index);
+    buf pdi_data = pdi_info.second;
     auto pdi_data_size = pdi_data.size();
 
     if (pdi_data_size > 0) {
-        m_pdi_bo = xrt::bo{ m_hwctx, pdi_data_size, xrt::bo::flags::cacheable, 1 /* fix me */ };
-        fill_bo_with_data(m_pdi_bo, pdi_data);
+      m_pdi_bo = xrt::bo{ m_hwctx, pdi_data_size, xrt::bo::flags::cacheable, 1 /* fix me */ };
+      fill_bo_with_data(m_pdi_bo, pdi_data);
 
-        if (is_dump_control_codes()) {
-            std::stringstream ss;
-            ss << "pdi bo address: " << std::hex << m_pdi_bo.address();
-            xrt_core::message::send(xrt_core::message::severity_level::debug, "xrt_module", ss.str());
-            std::string dump_file_name = "pdi_pre_patch" + std::to_string(get_id()) + ".bin";
-            dump_bo(m_pdi_bo, dump_file_name);
-        }
+      if (is_dump_control_codes()) {
+        std::stringstream ss;
+        ss << "pdi bo address: " << std::hex << m_pdi_bo.address();
+        xrt_core::message::send(xrt_core::message::severity_level::debug, "xrt_module", ss.str());
+        std::string dump_file_name = "pdi_pre_patch" + std::to_string(get_id()) + ".bin";
+        dump_bo(m_pdi_bo, dump_file_name);
+      }
 
-	// TODO: patch all pdi addresses properly
-        patch_instr(m_instr_bo, pdi_symbol, 0, m_pdi_bo, patcher::buf_type::ctrltext);
+	    // TODO: patch all pdi addresses properly
+      patch_instr(m_instr_bo, pdi_symbol, 0, m_pdi_bo, patcher::buf_type::ctrltext, m_instr_sec_idx);
     }
 
     if (m_ctrlpkt_bo) {
-      patch_instr(m_instr_bo, Control_Packet_Symbol, 0, m_ctrlpkt_bo, patcher::buf_type::ctrltext);
+      patch_instr(m_instr_bo, Control_Packet_Symbol, 0, m_ctrlpkt_bo, patcher::buf_type::ctrltext, m_instr_sec_idx);
     }
     XRT_DEBUGF("<- module_sram::create_instr_buf()\n");
   }
@@ -1415,7 +1440,8 @@ class module_sram : public module_impl
   void
   create_ctrlpkt_buf(const module_impl* parent)
   {
-    const auto& data = parent->get_ctrlpkt(m_index);
+    control_packet data;
+    std::tie(m_ctrlpkt_sec_idx, data) = parent->get_ctrlpkt(m_index);
     size_t sz = data.size();
 
     if (sz == 0) {
@@ -1428,12 +1454,12 @@ class module_sram : public module_impl
     fill_ctrlpkt_buf(m_ctrlpkt_bo, data);
 
     if (is_dump_control_packet()) {
-        std::string dump_file_name = "ctr_packet_pre_patch" + std::to_string(get_id()) + ".bin";
-        dump_bo(m_ctrlpkt_bo, dump_file_name);
+      std::string dump_file_name = "ctr_packet_pre_patch" + std::to_string(get_id()) + ".bin";
+      dump_bo(m_ctrlpkt_bo, dump_file_name);
 
-        std::stringstream ss;
-        ss << "dumped file " << dump_file_name;
-        xrt_core::message::send(xrt_core::message::severity_level::debug, "xrt_module", ss.str());
+      std::stringstream ss;
+      ss << "dumped file " << dump_file_name;
+      xrt_core::message::send(xrt_core::message::severity_level::debug, "xrt_module", ss.str());
     }
   }
 
@@ -1459,9 +1485,10 @@ class module_sram : public module_impl
   }
 
   virtual void
-  patch_instr(xrt::bo& bo_ctrlcode, const std::string& argnm, size_t index, const xrt::bo& bo, patcher::buf_type type) override
+  patch_instr(xrt::bo& bo_ctrlcode, const std::string& argnm, size_t index, const xrt::bo& bo,
+              patcher::buf_type type, uint32_t sec_idx) override
   {
-    patch_instr_value(bo_ctrlcode, argnm, index, bo.address(), type);
+    patch_instr_value(bo_ctrlcode, argnm, index, bo.address(), type, sec_idx);
   }
 
   void
@@ -1475,15 +1502,15 @@ class module_sram : public module_impl
     if (m_parent->get_os_abi() == Elf_Amd_Aie2p || m_parent->get_os_abi() == Elf_Amd_Aie2p_config) {
       // patch control-packet buffer
       if (m_ctrlpkt_bo) {
-        if (m_parent->patch(m_ctrlpkt_bo.map<uint8_t*>(), argnm, index, value, patcher::buf_type::ctrldata))
+        if (m_parent->patch(m_ctrlpkt_bo.map<uint8_t*>(), argnm, index, value, patcher::buf_type::ctrldata, m_ctrlpkt_sec_idx))
           patched = true;
       }
 
       // patch instruction buffer
-      if (m_parent->patch(m_instr_bo.map<uint8_t*>(), argnm, index, value, patcher::buf_type::ctrltext))
+      if (m_parent->patch(m_instr_bo.map<uint8_t*>(), argnm, index, value, patcher::buf_type::ctrltext, m_instr_sec_idx))
           patched = true;
     }
-    else if (m_parent->patch(m_buffer.map<uint8_t*>(), argnm, index, value, patcher::buf_type::ctrltext))
+    else if (m_parent->patch(m_buffer.map<uint8_t*>(), argnm, index, value, patcher::buf_type::ctrltext, UINT32_MAX))
       patched = true;
 
     if (patched) {
@@ -1493,28 +1520,13 @@ class module_sram : public module_impl
   }
 
   void
-  patch_instr_value(xrt::bo& bo, const std::string& argnm, size_t index, uint64_t value, patcher::buf_type type)
+  patch_instr_value(xrt::bo& bo, const std::string& argnm, size_t index, uint64_t value,
+                    patcher::buf_type type, uint32_t sec_index)
   {
-    if (!m_parent->patch(bo.map<uint8_t*>(), argnm, index, value, type))
+    if (!m_parent->patch(bo.map<uint8_t*>(), argnm, index, value, type, sec_index))
       return;
 
     m_dirty = true;
-  }
-
-  void
-  patch(const std::string& argnm, size_t index, const xrt::bo& bo) override
-  {
-    patch_value(argnm, index, bo.address());
-  }
-
-  void
-  patch(const std::string& argnm, size_t index, const void* value, size_t size) override
-  {
-    if (size > 8) // NOLINT
-      throw std::runtime_error{ "patch_value() only supports 64-bit values or less" };
-    
-    auto arg_value = *static_cast<const uint64_t*>(value);
-    patch_value(argnm, index, arg_value);
   }
 
   // Check that all arguments have been patched and sync the buffer
@@ -1692,26 +1704,6 @@ public:
     return fill_ert_aie2ps(payload);
   }
 
-#if 0
-  uint32_t*
-  fill_ert_dpu_data_elf_flow(uint32_t *payload) const override
-  {
-    // npu preemption in elf_flow
-    auto npu = reinterpret_cast<ert_npu_preempt_data*>(payload);
-    npu->instruction_buffer = m_instr_bo.address();
-    npu->instruction_buffer_size = static_cast<uint32_t>(m_instr_bo.size());
-    npu->instruction_prop_count = 0; // Reserved for future use
-    if (m_preempt_save_bo && m_preempt_restore_bo) {
-      npu->save_buffer = m_preempt_save_bo.address();
-      npu->save_buffer_size = static_cast<uint32_t>(m_preempt_save_bo.size());
-      npu->restore_buffer = m_preempt_restore_bo.address();
-      npu->restore_buffer_size = static_cast<uint32_t>(m_preempt_restore_bo.size());
-    }
-    payload += sizeof(ert_npu_preempt_data) / sizeof(uint32_t);
-    return payload;
-  }
-#endif
-
   [[nodiscard]] virtual xrt::bo&
       get_scratch_pad_mem() override
   {
@@ -1737,6 +1729,22 @@ public:
     msg.append(dump_file_name);
     xrt_core::message::send(xrt_core::message::severity_level::debug, "xrt_module", msg);
   }
+
+  void
+  patch(const std::string& argnm, size_t index, const xrt::bo& bo) override
+  {
+    patch_value(argnm, index, bo.address());
+  }
+
+  void
+  patch(const std::string& argnm, size_t index, const void* value, size_t size) override
+  {
+    if (size > 8) // NOLINT
+      throw std::runtime_error{ "patch_value() only supports 64-bit values or less" };
+    
+    auto arg_value = *static_cast<const uint64_t*>(value);
+    patch_value(argnm, index, arg_value);
+  }
 };
 
 } // namespace xrt
@@ -1752,28 +1760,28 @@ fill_ert_dpu_data(const xrt::module& module, uint32_t* payload)
   return module.get_handle()->fill_ert_dpu_data(payload);
 }
 
-//uint32_t*
-//fill_ert_dpu_data_elf_flow(const xrt::module& module, uint32_t* payload)
-//{
-//  return module.get_handle()->fill_ert_dpu_data_elf_flow(payload);
-//}
-
 void
 patch(const xrt::module& module, const std::string& argnm, size_t index, const xrt::bo& bo)
 {
-  module.get_handle()->patch(argnm, index, bo);
+  auto module_sram = std::dynamic_pointer_cast<xrt::module_sram>(module.get_handle());
+  if (!module_sram)
+    throw std::runtime_error("Getting module_sram failed, wrong module object passed\n");
+  module_sram->patch(argnm, index, bo);
 }
 
 void
-patch(const xrt::module& module, uint8_t* ibuf, size_t* sz, const std::vector<std::pair<std::string, uint64_t>>* args)
+patch(const xrt::module& module, uint8_t* ibuf, size_t* sz, const std::vector<std::pair<std::string, uint64_t>>* args,
+      uint32_t idx)
 {
   auto hdl = module.get_handle();
   size_t orig_sz = *sz;
   const buf* inst = nullptr;
+  uint32_t patch_index = UINT32_MAX;
 
   if (hdl->get_os_abi() == Elf_Amd_Aie2p || Elf_Amd_Aie2p_config) {
-    const auto& instr_buf = hdl->get_instr();
-    inst = &instr_buf;
+    auto instr_info = hdl->get_instr(idx);
+    inst = &(instr_info.second);
+    patch_index = instr_info.first;
   }
   else if(hdl->get_os_abi() == Elf_Amd_Aie2ps) {
     const auto& instr_buf = hdl->get_data();
@@ -1795,7 +1803,7 @@ patch(const xrt::module& module, uint8_t* ibuf, size_t* sz, const std::vector<st
 
   size_t index = 0;
   for (auto& [arg_name, arg_addr] : *args) {
-    if (!hdl->patch(ibuf, arg_name, index, arg_addr, patcher::buf_type::ctrltext))
+    if (!hdl->patch(ibuf, arg_name, index, arg_addr, patcher::buf_type::ctrltext, patch_index))
       throw std::runtime_error{"Failed to patch " + arg_name};
     index++;
   }
@@ -1804,7 +1812,10 @@ patch(const xrt::module& module, uint8_t* ibuf, size_t* sz, const std::vector<st
 void
 patch(const xrt::module& module, const std::string& argnm, size_t index, const void* value, size_t size)
 {
-  module.get_handle()->patch(argnm, index, value, size);
+  auto module_sram = std::dynamic_pointer_cast<xrt::module_sram>(module.get_handle());
+  if (!module_sram)
+    throw std::runtime_error("Getting module_sram failed, wrong module object passed\n");
+  module_sram->patch(argnm, index, value, size);
 }
 
 void
@@ -1829,22 +1840,6 @@ dump_scratchpad_mem(const xrt::module& module)
   module_sram->dump_scratchpad_mem();
 }
 
-xrt::module
-get_module(const std::string& name)
-{
-  // iterate over modules in module map and get the kernel signature
-  // demangle the kernel signature and get kernel name
-  // match it with name provided and return
-  for (const auto& m : xrt::module_impl::m_module_map) {
-    try {
-      if (name == m.get_handle()->get_kernel_name())
-        return m;
-    }
-    catch (...) {}
-  }
-  throw std::runtime_error("No module found with kernel : " + name);
-}
-
 std::string
 get_kernel_signature(const xrt::module& module)
 {
@@ -1867,34 +1862,17 @@ namespace xrt
 module::
 module(const xrt::elf& elf)
 : detail::pimpl<module_impl>{ std::make_shared<module_elf>(elf) }
-{
-  if (module_impl::m_module_map.empty()) {
-    module_impl::m_module_map.emplace_back(*this);
-  }
-}
+{}
 
 module::
 module(void* userptr, size_t sz, const xrt::uuid& uuid)
 : detail::pimpl<module_impl>{ std::make_shared<module_userptr>(userptr, sz, uuid) }
-{
-  module_impl::m_module_map.emplace_back(*this);
-}
+{}
 
 module::
 module(const xrt::module& parent, const xrt::hw_context& hwctx)
 : detail::pimpl<module_impl>{ std::make_shared<module_sram>(parent.handle, hwctx) }
-{
-  //module_impl::m_module_map.emplace_back(*this);
-}
-
-module::
-~module()
-{
-  module_impl::m_module_map.erase(std::remove_if(module_impl::m_module_map.begin(),
-                                                 module_impl::m_module_map.end(),
-                                                 [this](const xrt::module& obj){ return &obj == this; }),
-                                  module_impl::m_module_map.end());
-}
+{}
 
 xrt::uuid
 module::

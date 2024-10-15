@@ -38,7 +38,8 @@ patch(const xrt::module&, const std::string& argnm, size_t index, const xrt::bo&
 // of the control code buffer.
 XRT_CORE_COMMON_EXPORT
 void
-patch(const xrt::module&, uint8_t*, size_t*, const std::vector<std::pair<std::string, uint64_t>>*);
+patch(const xrt::module&, uint8_t*, size_t*, const std::vector<std::pair<std::string, uint64_t>>*,
+      uint32_t index = 0);
 
 // Patch scalar into control code at given argument
 XRT_CORE_COMMON_EXPORT
