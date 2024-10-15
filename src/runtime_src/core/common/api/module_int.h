@@ -66,6 +66,9 @@ get_module(const std::string& name);
 std::string
 get_kernel_signature(const xrt::module& module);
 
+std::string
+get_kernel_name(const xrt::module& module);
+
 // Get partition size if ELF has info
 uint32_t
 get_partition_size(const xrt::module& module);

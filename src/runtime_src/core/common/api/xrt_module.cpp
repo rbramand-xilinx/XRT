@@ -496,37 +496,17 @@ public:
     throw std::runtime_error("Not supported");
   }
 
-  // get kernel signature in mangled format
+  // get kernel signature in demmangled format
   [[nodiscard]] virtual std::string
   get_kernel_signature() const
   {
     throw std::runtime_error("Not supported");
   }
 
-  std::string
-  get_demangled_kernel_signature() const
-  {
-    // Gets kernel signature or throws error if not applicable
-  
-    // TODO : add code to get kernel signature
-    // Use default signature for now
-    std::string kernel_sig {"_Z3DPUPvS_S_S_S_"};
-
-    // demangle and return
-    return demangle(kernel_sig);
-  }
-
-  std::string
+  [[nodiscard]] virtual std::string
   get_kernel_name() const
   {
-    std::string demangled_name = get_demangled_kernel_signature();
-
-    // extract kernel name
-    size_t pos = demangled_name.find('(');
-    if (pos == std::string::npos)
-      throw std::runtime_error("Failed to get kernel name");
-
-    return demangled_name.substr(0, pos);
+    throw std::runtime_error("Not supported");
   }
 };
 
@@ -647,13 +627,13 @@ class module_elf : public module_impl
       unsigned char other;
 
       // Read symbol data
-      symbols.get_symbol(i, name, value, size, bind, type, section_index, other);
-
-      // there will be only 1 kernel signature symbol entry in .symtab section whose
-      // type is FUNC
-      if (type == ELFIO::STT_FUNC) {
-        m_kernel_signature = demangle(name);
-        break;
+      if (symbols.get_symbol(i, name, value, size, bind, type, section_index, other)) {
+        // there will be only 1 kernel signature symbol entry in .symtab section whose
+        // type is FUNC
+        if (type == ELFIO::STT_FUNC) {
+          m_kernel_signature = demangle(name);
+          break;
+        }
       }
     }
   }
@@ -1104,12 +1084,25 @@ public:
   }
 
   [[nodiscard]] virtual std::string
-  get_kernel_signature() const
+  get_kernel_signature() const override
   {
     if (m_kernel_signature.empty())
       throw std::runtime_error("No kernel signature available, wrong ELF passed\n");
   
     return m_kernel_signature;
+  }
+
+  [[nodiscard]] virtual std::string
+  get_kernel_name() const override
+  {
+    std::string demangled_name = get_kernel_signature();
+
+    // extract kernel name
+    size_t pos = demangled_name.find('(');
+    if (pos == std::string::npos)
+      throw std::runtime_error("Failed to get kernel name");
+
+    return demangled_name.substr(0, pos);
   }
 };
 
@@ -1775,9 +1768,15 @@ dump_scratchpad_mem(const xrt::module& module)
 }
 
 std::string
+get_kernel_name(const xrt::module& module)
+{
+  return module.get_handle()->get_kernel_name();
+}
+
+std::string
 get_kernel_signature(const xrt::module& module)
 {
-  return module.get_handle()->get_demangled_kernel_signature();
+  return module.get_handle()->get_kernel_signature();
 }
 
 uint32_t

@@ -48,7 +48,7 @@ xrt::xclbin::kernel
 get_kernel(const xrt::hw_context& hwctx);
 
 xrt::module
-get_module(const xrt::hw_context& hwctx, uint32_t index);
+get_module(const xrt::hw_context& hwctx, const std::string& kname);
 
 }} // hw_context_int, xrt_core
 

@@ -1612,7 +1612,7 @@ public:
       name = nm.substr(0, i);
       m_ctrl_code_index = std::stoul(nm.substr(i+1, nm.size()-i-1));
     }
-    m_module = xrt_core::hw_context_int::get_module(hwctx, m_ctrl_code_index);
+    m_module = xrt_core::hw_context_int::get_module(hwctx, name);
     auto demangled_name = xrt_core::module_int::get_kernel_signature(m_module);
       
     // extract kernel name
@@ -1633,10 +1633,6 @@ public:
 
     std::string argstring = demangled_name.substr(startPos + 1, endPos - startPos - 1);
     std::vector<std::string> argstrings = split(argstring, ',');
-
-    // set cu_mask as 0x1, this should be removed once we use new firmware
-    unsigned int cu_idx = 0; // To be REMOVED
-    cumask.set(cu_idx); // To be REMOVED
 
     size_t count = 0;
     size_t offset = 0;

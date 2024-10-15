@@ -35,7 +35,7 @@ class hw_context_impl : public std::enable_shared_from_this<hw_context_impl>
 
   std::shared_ptr<xrt_core::device> m_core_device;
   xrt::xclbin m_xclbin;
-  std::vector<xrt::module> m_module_map;
+  std::map<std::string, xrt::module> m_module_map; // map b/w kernel name and module
   uint32_t m_partition_size = 0;
   cfg_param_type m_cfg_param;
   temp_elf_type m_elf_param;
@@ -83,8 +83,11 @@ public:
     , m_cfg_param{std::move(cfg_param)}
     , m_mode{mode}
   {
-    m_module_map.emplace_back(elf);
-    m_partition_size = xrt_core::module_int::get_partition_size(m_module_map[0]);
+    auto module = xrt::module(elf);
+    auto kernel_name = xrt_core::module_int::get_kernel_name(module);
+    m_module_map[kernel_name] = std::move(module);
+
+    m_partition_size = xrt_core::module_int::get_partition_size(m_module_map.begin()->second);
     m_hdl = m_core_device->create_hw_context(m_partition_size, m_cfg_param, mode);
   }
 
@@ -119,19 +122,28 @@ public:
   void
   add_config(const xrt::elf& elf)
   {
+    auto module = xrt::module(elf);
+    auto kernel_name = xrt_core::module_int::get_kernel_name(module);
+    auto part_size = xrt_core::module_int::get_partition_size(module);
+
     // create hw ctx handle if not already created
     if (m_hdl == nullptr) {
-      m_module_map.emplace_back(elf);
-      m_partition_size = xrt_core::module_int::get_partition_size(m_module_map[0]);
+      m_module_map[kernel_name] = std::move(module);
+
+      m_partition_size = part_size;
       m_hdl = m_core_device->create_hw_context(m_partition_size, m_cfg_param, m_mode);
       return;
     }
 
-    auto module = xrt::module(elf);
-    if (m_partition_size != xrt_core::module_int::get_partition_size(module))
+    // add module to map if kernel name is different, else throw
+    if (m_partition_size != part_size)
       throw std::runtime_error("can not add config to ctx with different configuration\n");
 
-    m_module_map.emplace_back(elf);
+    for (const auto& m : m_module_map) {
+      if (kernel_name == xrt_core::module_int::get_kernel_name(m.second))
+        throw std::runtime_error("config with kernel already exists, cannot add this config\n");
+    }
+    m_module_map[kernel_name] = std::move(module);
   }
 
   void
@@ -184,11 +196,13 @@ public:
   }
 
   xrt::module
-  get_module(uint32_t index)
+  get_module(const std::string& kname) const
   {
-    if (m_module_map.empty() || index >= m_module_map.size())
-      throw std::runtime_error("Invalid module index");
-    return m_module_map[index];
+    for (const auto& m : m_module_map) {
+      if (kname == xrt_core::module_int::get_kernel_name(m.second))
+        return m.second;
+    }
+    throw std::runtime_error("no module found with given kernel name in ctx");
   }
 };
 
@@ -228,9 +242,9 @@ create_hw_context_from_implementation(void* hwctx_impl)
 }
 
 xrt::module
-get_module(const xrt::hw_context& ctx, uint32_t index)
+get_module(const xrt::hw_context& ctx, const std::string& kname)
 {
-  return ctx.get_handle()->get_module(index);
+  return ctx.get_handle()->get_module(kname);
 }
 
 } // xrt_core::hw_context_int
