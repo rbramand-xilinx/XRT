@@ -190,15 +190,6 @@ public:
       throw std::runtime_error("Invalid module index");
     return m_module_map[index];
   }
-
-#if 0
-  xrt::xclbin::kernel
-  get_kernel()
-  {
-    printf("__larry_hwctx: enter hw_context::get_kernel\n");
-    return m_kernel;
-  }
-#endif
 };
 
 } // xrt
@@ -241,15 +232,6 @@ get_module(const xrt::hw_context& ctx, uint32_t index)
 {
   return ctx.get_handle()->get_module(index);
 }
-
-#if 0
-xrt::xclbin::kernel
-get_kernel(const xrt::hw_context& hwctx)
-{
-  printf("__larry_hwctx: enter xrt_core::hw_context_int::get_kernel\n");
-  return hwctx.get_handle()->get_kernel();
-}
-#endif
 
 } // xrt_core::hw_context_int
 

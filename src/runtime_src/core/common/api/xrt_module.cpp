@@ -408,12 +408,6 @@ public:
     throw std::runtime_error("Not supported");
   }
 
-  //virtual uint32_t*
-  //fill_ert_dpu_data_elf_flow(uint32_t *) const
-  //{
-  //  throw std::runtime_error("Not supported");
-  //}
-
   [[nodiscard]] virtual uint8_t
   get_os_abi() const
   {
@@ -684,44 +678,6 @@ class module_elf : public module_impl
     }
   }
 
-#if 0
-  // Extract instruction buffer from ELF sections without assuming anything
-  // about order of sections in the ELF file.
-  void
-  initialize_instr_buf()
-  {
-    for (const auto& sec : m_elfio.sections) {
-      auto name = sec->get_name();
-      instr_buf instrbuf;
-      // Instruction buffer is in .ctrltext.* section.
-      if (name.find(patcher::section_name_to_string(patcher::buf_type::ctrltext)) == std::string::npos)
-        continue;
-      
-      uint32_t index = get_section_name_index(name);
-      instrbuf.append_section_data(sec.get());
-      m_instr_buf_map.emplace({index, instrbuf});
-    }
-  }
-
-  // Extract control-packet buffer from ELF sections without assuming anything
-  // about order of sections in the ELF file.
-  void
-  initialize_ctrl_packet(const ELFIO::elfio& elf)
-  {
-    for (const auto& sec : elf.sections) {
-      auto name = sec->get_name();
-      control_packet ctrlpacket;
-      // Instruction buffer is in .ctrldata.* section.
-      if (name.find(patcher::section_name_to_string(patcher::buf_type::ctrldata)) == std::string::npos)
-        continue;
-
-      uint32_t index = get_section_name_index(name);
-      ctrlpacket.append_section_data(sec.get());
-      m_ctrl_packet_map.emplace({index, ctrlpacket});
-    }
-  }
-#endif
-
   // Extract preempt_save buffer from ELF sections
   // return true if section exist
   bool
@@ -756,24 +712,6 @@ class module_elf : public module_impl
 
     return false;
   }
-
-#if 0
-  // Extract pdi from ELF sections
-  void
-  initialize_pdi_buf(const ELFIO::elfio& elf)
-  {
-    for (const auto& sec : elf.sections) {
-      auto name = sec->get_name();
-      buf pdi_buf;
-      if (name.find(patcher::section_name_to_string(patcher::buf_type::pdi)) == std::string::npos)
-        continue;
-
-      uint32_t index = get_section_name_index(name);
-      pdi_buf.append_section_data(sec.get());
-      m_pdi_buf_map.emplace({index, pdi_buf});
-    }
-  }
-#endif
 
   // Extract control code from ELF sections without assuming anything
   // about order of sections in the ELF file.  Build helper data
@@ -1494,10 +1432,6 @@ class module_sram : public module_impl
   void
   patch_value(const std::string& argnm, size_t index, uint64_t value)
   {
-    // HACK : index and arg num differ in new elf flow
-    // this should be removed once we have proper elf
-    index += 3;
-
     bool patched = false;
     if (m_parent->get_os_abi() == Elf_Amd_Aie2p || m_parent->get_os_abi() == Elf_Amd_Aie2p_config) {
       // patch control-packet buffer
@@ -1662,7 +1596,7 @@ class module_sram : public module_impl
   }
 
 public:
-  module_sram(std::shared_ptr<module_impl> parent, xrt::hw_context hwctx, uint32_t index = 0)
+  module_sram(std::shared_ptr<module_impl> parent, xrt::hw_context hwctx, uint32_t index)
     : module_impl{ parent->get_cfg_uuid() }
     , m_parent{ std::move(parent) }
     , m_hwctx{ std::move(hwctx) }
@@ -1870,8 +1804,8 @@ module(void* userptr, size_t sz, const xrt::uuid& uuid)
 {}
 
 module::
-module(const xrt::module& parent, const xrt::hw_context& hwctx)
-: detail::pimpl<module_impl>{ std::make_shared<module_sram>(parent.handle, hwctx) }
+module(const xrt::module& parent, const xrt::hw_context& hwctx, uint32_t ctrl_code_idx)
+: detail::pimpl<module_impl>{ std::make_shared<module_sram>(parent.handle, hwctx, ctrl_code_idx) }
 {}
 
 xrt::uuid

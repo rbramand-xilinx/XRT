@@ -1316,7 +1316,7 @@ private:
   size_t num_cumasks = 1;              // Required number of command cu masks
   control_type protocol = control_type::none; // Default opcode
   uint32_t uid;                        // Internal unique id for debug
-  uint32_t control_code_index = UINT32_MAX;
+  uint32_t m_ctrl_code_index = 0;   // Index to identify which ctrl code to load in elf
   std::shared_ptr<xrt_core::usage_metrics::base_logger> m_usage_logger =
       xrt_core::usage_metrics::get_usage_metrics_logger();
 
@@ -1534,15 +1534,6 @@ private:
     return tokens;
   }
 
-#if 0
-  xrt::xclbin::kernel
-  get_kernel_or_error(const xrt::hw_context hwctx, const std::string& nm)
-  {
-    printf("__larry_kernel: in %s cp 1\n", __func__);
-    return xrt_core::hw_context_int::get_kernel(hwctx);
-  }
-#endif
-
 public:
   // kernel_type - constructor
   //
@@ -1601,35 +1592,27 @@ public:
   }
 
   kernel_impl(std::shared_ptr<device_type> dev, xrt::hw_context ctx, const std::string& nm, int flag)
-    //: name(nm.substr(0, nm.find(":")))                          // filter instance names
     : device(std::move(dev))                                   // share ownership
     , ctxmgr(xrt_core::context_mgr::create(device->core_device.get())) // owership tied to kernel_impl
     , hwctx(std::move(ctx))                                    // hw context
     , hwqueue(hwctx)                                           // hw queue
-//  , hwqueue(device->get_core_device())                       // hw queue
-    //, m_module{std::move(mod)}                                 // module if any
     , xclbin(hwctx.get_xclbin())                               // xclbin with kernel
-    //, xkernel(get_kernel_or_error(xclbin, name))               // kernel meta data managed by xclbin
-    //, properties(xrt_core::xclbin_int::get_properties(xkernel))// cache kernel properties
     , uid(create_uid())
   {
     XRT_DEBUGF("kernel_impl::kernel_impl(%d)\n" , uid);
-
-    printf("__larry_kernel: in %s cp 1\n", __func__);
 
     // xclbin elf use case, create kernel
     // get kernel signature from the module
     // kernel name will be of format - <kernel_name>:<index>
     auto i = nm.find(":");
-    control_code_index = 0;
     if (i == std::string::npos) {
       name = nm.substr(0, nm.size());
     }
     else {
       name = nm.substr(0, i);
-      control_code_index = std::stoul(nm.substr(i+1, nm.size()-i-1));
+      m_ctrl_code_index = std::stoul(nm.substr(i+1, nm.size()-i-1));
     }
-    m_module = xrt_core::hw_context_int::get_module(hwctx, control_code_index);
+    m_module = xrt_core::hw_context_int::get_module(hwctx, m_ctrl_code_index);
     auto demangled_name = xrt_core::module_int::get_kernel_signature(m_module);
       
     // extract kernel name
@@ -1652,8 +1635,8 @@ public:
     std::vector<std::string> argstrings = split(argstring, ',');
 
     // set cu_mask as 0x1, this should be removed once we use new firmware
-    unsigned int cu_idx = 0;// to be REMOVED
-    cumask.set(cu_idx);// to be REMOVED
+    unsigned int cu_idx = 0; // To be REMOVED
+    cumask.set(cu_idx); // To be REMOVED
 
     size_t count = 0;
     size_t offset = 0;
@@ -1664,19 +1647,20 @@ public:
       if (str.find('*') == std::string::npos)
         throw std::runtime_error("arg type not supported for this kind of kernel");
 
+      static constexpr size_t global_arg_size = 0x8;
       xrt_core::xclbin::kernel_argument arg;
       arg.name = "argv" + std::to_string(count);
       arg.hosttype = "no-type";
       arg.port = "no-port";
       arg.index = count;
-      arg.size = 0x8;
+      arg.size = global_arg_size;
       arg.offset = offset;
       arg.dir = xrt_core::xclbin::kernel_argument::direction::input;
       arg.type = xrt_core::xclbin::kernel_argument::argtype::global;
 
       args.emplace_back(arg);
       count ++;
-      offset += 0x8;
+      offset += global_arg_size;
     }
 
     // fill kernel properties
@@ -1696,12 +1680,6 @@ public:
   kernel_impl(std::shared_ptr<device_type> dev, xrt::hw_context ctx, const std::string& nm)
     : kernel_impl{std::move(dev), std::move(ctx), {}, nm}
   {}
-
-#if 0
-  kernel_impl(std::shared_ptr<device_type> dev, xrt::hw_context ctx, const std::string& nm, int flag)
-    : kernel_impl{std::move(dev), std::move(ctx), xrt_core::module_int::get_module(name), nm, flag}
-  {}
-#endif
 
   std::shared_ptr<kernel_impl>
   get_shared_ptr()
@@ -1763,6 +1741,12 @@ public:
   get_name() const
   {
     return name;
+  }
+
+  uint32_t
+  get_ctrl_code_index() const
+  {
+    return m_ctrl_code_index;
   }
 
   xrt::xclbin
@@ -2062,12 +2046,12 @@ class run_impl
   // This function copies the module into a hw_context.  The module
   // will be associated with hwctx specific memory.
   static xrt::module
-  copy_module(const xrt::module& module, const xrt::hw_context& hwctx)
+  copy_module(const xrt::module& module, const xrt::hw_context& hwctx, uint32_t ctrl_code_idx)
   {
     if (!module)
       return {};
 
-    return {module, hwctx};
+    return {module, hwctx, ctrl_code_idx};
   }
 
   virtual std::unique_ptr<arg_setter>
@@ -2178,17 +2162,6 @@ class run_impl
     return payload;
   }
 
-#if 0
-  uint32_t*
-  initialize_dpu_elf_flow(uint32_t* payload)
-  {
-    payload = xrt_core::module_int::fill_ert_dpu_data_elf_flow(m_module, payload);
-
-    // Return payload past the ert_dpu_data structures
-    return payload;
-  }
-#endif
-
   // Initialize the command packet with special case for DPU kernels
   uint32_t*
   initialize_command(kernel_command* pkt)
@@ -2259,7 +2232,7 @@ public:
   explicit
   run_impl(std::shared_ptr<kernel_impl> k)
     : kernel(std::move(k))
-    , m_module{copy_module(kernel->get_module(), kernel->get_hw_context())}
+    , m_module{copy_module(kernel->get_module(), kernel->get_hw_context(), kernel->get_ctrl_code_index())}
     , m_hwqueue(kernel->get_hw_queue())
     , ips(kernel->get_ips())
     , cumask(kernel->get_cumask())
