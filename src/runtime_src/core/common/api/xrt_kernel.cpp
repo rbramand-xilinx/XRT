@@ -1306,7 +1306,7 @@ private:
   xrt::xclbin::kernel xkernel;         // kernel xclbin metadata
   std::vector<argument> args;          // kernel args sorted by argument index
   std::vector<ipctx> ipctxs;           // CU context locks
-  property_type properties;     // Kernel properties from XML meta
+  property_type properties;            // Kernel properties from XML meta
   std::bitset<max_cus> cumask;         // cumask for command execution
   size_t regmap_size = 0;              // CU register map size
   size_t fa_num_inputs = 0;            // Fast adapter number of inputs per meta data
@@ -1316,7 +1316,7 @@ private:
   size_t num_cumasks = 1;              // Required number of command cu masks
   control_type protocol = control_type::none; // Default opcode
   uint32_t uid;                        // Internal unique id for debug
-  uint32_t m_ctrl_code_index = 0;   // Index to identify which ctrl code to load in elf
+  uint32_t m_ctrl_code_index = 0;      // Index to identify which ctrl code to load in elf
   std::shared_ptr<xrt_core::usage_metrics::base_logger> m_usage_logger =
       xrt_core::usage_metrics::get_usage_metrics_logger();
 
@@ -1528,10 +1528,55 @@ private:
     std::stringstream ss(s);
     std::string item;
 
-    while (getline(ss, item, delimiter)) {
+    while (getline(ss, item, delimiter))
       tokens.push_back(item);
-    }
+
     return tokens;
+  }
+
+  static void
+  construct_elf_kernel_args(const std::string& kernel_name)
+  {
+    // kernel signature - name(argtype, argtype ...)
+    size_t start_pos = kernel_name.find('(');
+    size_t end_pos = kernel_name.find(')', start_pos);
+
+    if (start_pos == std::string::npos || end_pos == std::string::npos || start_pos > end_pos)
+      throw std::runtime_error("Failed to get kernel args");
+
+    std::string argstring = kernel_name.substr(start_pos + 1, end_pos - start_pos - 1);
+    std::vector<std::string> argstrings = split(argstring, ',');
+
+    size_t count = 0;
+    size_t offset = 0;
+    for (const std::string& str : argstrings) {
+      xrt_core::xclbin::kernel_argument arg;
+      arg.name = "argv" + std::to_string(count);
+      arg.hosttype = "no-type";
+      arg.port = "no-port";
+      arg.index = count;
+      arg.offset = offset;
+      arg.dir = xrt_core::xclbin::kernel_argument::direction::input;
+      // if arg has pointer(*) in its name (eg: char*, void*) it is of type global otherwise scalar
+      arg.type = (str.find('*') == std::string::npos)
+               ? xrt_core::xclbin::kernel_argument::argtype::global
+               : xrt_core::xclbin::kernel_argument::argtype::scalar;
+
+      // At present only global args are supported
+      // TODO : Add support for scalar args in ELF flow
+      if (arg.type == xrt_core::xclbin::kernel_argument::argtype::scalar)
+        throw std::runtime_error("scalar args are not yet supported for this kind of kernel");
+      else {
+        // global arg
+        static constexpr size_t global_arg_size = 0x8;
+        arg.size = global_arg_size;        
+
+        offset += global_arg_size;
+      }
+
+      args.emplace_back(arg);
+      count++;
+    }
   }
 
 public:
@@ -1556,6 +1601,8 @@ public:
     , properties(xrt_core::xclbin_int::get_properties(xkernel))// cache kernel properties
     , uid(create_uid())
   {
+    XRT_DEBUGF("kernel_impl::kernel_impl(%d)\n" , uid);
+
     // mailbox kernels opens CU in exclusive mode for direct read/write access
     if (properties.mailbox != mailbox_type::none || properties.counted_auto_restart > 0) {
         XRT_DEBUGF("kernel_impl mailbox or counted auto restart detected, changing access mode to exclusive");
@@ -1592,26 +1639,28 @@ public:
   }
 
   kernel_impl(std::shared_ptr<device_type> dev, xrt::hw_context ctx, const std::string& nm, int flag)
-    : device(std::move(dev))                                   // share ownership
-    , ctxmgr(xrt_core::context_mgr::create(device->core_device.get())) // owership tied to kernel_impl
-    , hwctx(std::move(ctx))                                    // hw context
-    , hwqueue(hwctx)                                           // hw queue
-    , xclbin(hwctx.get_xclbin())                               // xclbin with kernel
+    : device(std::move(dev))    // share ownership
+    , hwctx(std::move(ctx))     // hw context
+    , hwqueue(hwctx)            // hw queue
     , uid(create_uid())
   {
-    XRT_DEBUGF("kernel_impl::kernel_impl(%d)\n" , uid);
+    XRT_DEBUGF("kernel_impl::kernel_impl(%d)\n", uid);
 
-    // xclbin elf use case, create kernel
-    // get kernel signature from the module
+    // ELF use case, identify module from ctx that has given kernel name and
+    // get kernel signature from the module to construct kernel args etc
+  
     // kernel name will be of format - <kernel_name>:<index>
     auto i = nm.find(":");
     if (i == std::string::npos) {
+      // default case - ctrl code 0 will be used
       name = nm.substr(0, nm.size());
+      m_ctrl_code_index = 0;
     }
     else {
       name = nm.substr(0, i);
       m_ctrl_code_index = std::stoul(nm.substr(i+1, nm.size()-i-1));
     }
+
     m_module = xrt_core::hw_context_int::get_module(hwctx, name);
     auto demangled_name = xrt_core::module_int::get_kernel_signature(m_module);
       
@@ -1623,41 +1672,8 @@ public:
     // ideally this check is not needed once elf flow is stabilized
     if (name != demangled_name.substr(0, pos))
       throw std::runtime_error("Kernel name mismatch, incorrect module picked\n");
-
-    // extract kernel arguments
-    size_t startPos = demangled_name.find('(');
-    size_t endPos = demangled_name.find(')', startPos);
-
-    if (startPos == std::string::npos || endPos == std::string::npos || startPos > endPos)
-      throw std::runtime_error("Failed to get kernel args");
-
-    std::string argstring = demangled_name.substr(startPos + 1, endPos - startPos - 1);
-    std::vector<std::string> argstrings = split(argstring, ',');
-
-    size_t count = 0;
-    size_t offset = 0;
-    for (const std::string& str : argstrings) {
-      // if arg has pointer(*) in its name (eg: char*, void*) it is of type global otherwise scalar
-      // in this new flow all the args are of type global
-      // so each arg size is 0x8 and offset starts at 0 for 0th arg and is incremented by 0x8
-      if (str.find('*') == std::string::npos)
-        throw std::runtime_error("arg type not supported for this kind of kernel");
-
-      static constexpr size_t global_arg_size = 0x8;
-      xrt_core::xclbin::kernel_argument arg;
-      arg.name = "argv" + std::to_string(count);
-      arg.hosttype = "no-type";
-      arg.port = "no-port";
-      arg.index = count;
-      arg.size = global_arg_size;
-      arg.offset = offset;
-      arg.dir = xrt_core::xclbin::kernel_argument::direction::input;
-      arg.type = xrt_core::xclbin::kernel_argument::argtype::global;
-
-      args.emplace_back(arg);
-      count ++;
-      offset += global_arg_size;
-    }
+    
+    construct_elf_kernel_args(demangled_name);
 
     // fill kernel properties
     properties.name = name;
@@ -1671,11 +1687,6 @@ public:
 
     m_usage_logger->log_kernel_info(device->core_device.get(), hwctx, name, args.size());
   }
-
-  // Delegating constructor with no module
-  kernel_impl(std::shared_ptr<device_type> dev, xrt::hw_context ctx, const std::string& nm)
-    : kernel_impl{std::move(dev), std::move(ctx), {}, nm}
-  {}
 
   std::shared_ptr<kernel_impl>
   get_shared_ptr()
@@ -2110,14 +2121,13 @@ class run_impl
   xrt::bo
   validate_bo_at_index(size_t index, const xrt::bo& bo)
   {
+    // ELF flow doesn't have arg connectivity, so skip validation
+    if (!kernel->get_xclbin())
+      return bo;
+
     xcl_bo_flags grp {xrt_core::bo::group_id(bo)};
     if (validate_ip_arg_connectivity(index, grp.bank))
       return bo;
-    else {
-      std::cout << "__rahul check arg connectivity fails as we dont have arg connectivity\n";
-      std::cout << "skipping this error\n";
-      return bo;
-    }
 
     auto fmt = boost::format
       ("Kernel %s has no compute units with connectivity required for global argument at index %d. "
@@ -3545,7 +3555,8 @@ alloc_kernel_from_ctx(const std::shared_ptr<device_type>& dev,
                       const xrt::hw_context& hwctx,
                       const std::string& name)
 {
-  return std::make_shared<xrt::kernel_impl>(dev, hwctx, name);
+  // create kernel_impl with empty module
+  return std::make_shared<xrt::kernel_impl>(dev, hwctx, {}, name);
 }
 
 static std::shared_ptr<xrt::kernel_impl>
@@ -3562,7 +3573,7 @@ alloc_kernel_from_name(const std::shared_ptr<device_type>& dev,
                        const xrt::hw_context& hwctx,
                        const std::string& name)
 {
-  return std::make_shared<xrt::kernel_impl>(dev, hwctx, name, true);
+  return std::make_shared<xrt::kernel_impl>(dev, hwctx, name);
 }
 
 static std::shared_ptr<xrt::mailbox_impl>

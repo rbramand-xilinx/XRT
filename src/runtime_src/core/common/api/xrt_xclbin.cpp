@@ -1551,6 +1551,7 @@ send_exception_message(const char* msg)
 // xclbin using C pointer to xclbin
 ////////////////////////////////////////////////////////////////
 namespace xrt_core::xclbin_int {
+
 const axlf*
 get_axlf(xrtXclbinHandle handle)
 {
@@ -1585,7 +1586,6 @@ read_xclbin(const std::string& fnm)
 const xrt_core::xclbin::kernel_properties&
 get_properties(const xrt::xclbin::kernel& kernel)
 {
-  printf("__larry_xclbin: enter %s\n", __func__);
   return kernel.get_handle()->m_properties;
 }
 

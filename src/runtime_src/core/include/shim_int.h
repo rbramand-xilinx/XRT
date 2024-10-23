@@ -76,10 +76,6 @@ create_hw_context(xclDeviceHandle handle,
                   xrt::hw_context::access_mode mode);
 
 std::unique_ptr<xrt_core::hwctx_handle>
-create_hw_context(xclDeviceHandle handle,
-                  const xrt::hw_context::temp_elf_type& elf);
-
-std::unique_ptr<xrt_core::hwctx_handle>
 create_hw_context(xclDeviceHandle handle, uint32_t partition_size);
 
 // get_hw_queue() -

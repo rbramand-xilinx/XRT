@@ -55,8 +55,6 @@ public:
   using cfg_param_type = std::map<std::string, uint32_t>;
   using qos_type = cfg_param_type; //alias to old type
 
-  using temp_elf_type = std::map<std::string, std::string>;
-
   /**
    * @enum access_mode - legacy access mode
    *
@@ -99,12 +97,12 @@ public:
   hw_context(const xrt::device& device, const cfg_param_type& cfg_param, access_mode mode);
 
   /**
-   * hw_context() - Constructor with QoS control
+   * hw_context() - Constructor with Elf file
    *
    * @param device
    *  Device where context is created
    * @param elf
-   *  xrt elf object created from config elf file
+   *  XRT Elf object created from config Elf file
    * @param cfg_param
    *  Configuration Parameters (incl. Quality of Service)
    * @param mode
@@ -120,12 +118,12 @@ public:
              access_mode mode = access_mode::shared);
 
   /**
-   * add_config() - adds config elf file to the context
+   * add_config() - adds config Elf file to the context
    * 
    * @param elf
-   *  xrt elf object created from config elf file
+   *  XRT Elf object created from config Elf file
    * 
-   * Adds config to context if it is first config added
+   * Adds config Elf to context if it is the first config added
    * If config already exists, it will be added only when configuration matches
    * with existing one else an exception is thrown
    */
@@ -140,7 +138,7 @@ public:
    *  Device where context is created
    * @param xclbin_id
    *  UUID of xclbin that should be assigned to HW resources
-   * @cfg_param
+   * @param cfg_param
    *  Configuration Parameters (incl. Quality of Service)
    *
    * The QoS definition is subject to change, so this API is not guaranteed
@@ -161,9 +159,6 @@ public:
    */
   XRT_API_EXPORT
   hw_context(const xrt::device& device, const xrt::uuid& xclbin_id, access_mode mode);
-
-  XRT_API_EXPORT
-  hw_context(const xrt::device& device, const temp_elf_type& elf);
 
   ///@cond
   // Undocumented construction w/o specifying qos
@@ -225,6 +220,7 @@ public:
 
   /**
    * get_xclbin_uuid() - UUID of xclbin from which context was created
+   * Returns empty uuid if context was created without xclbin (created with Elf)
    */
   XRT_API_EXPORT
   xrt::uuid
@@ -232,6 +228,7 @@ public:
 
   /**
    * get_xclbin() - Retrieve underlying xclbin matching the UUID
+   * Returns empty xclbin if context was created without xclbin (created with Elf)
    */
   XRT_API_EXPORT
   xrt::xclbin

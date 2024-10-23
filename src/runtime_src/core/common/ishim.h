@@ -165,12 +165,6 @@ struct ishim
                     xrt::hw_context::access_mode /*mode*/) const
   { throw not_supported_error{__func__}; }
 
-#if 1
-  virtual std::unique_ptr<hwctx_handle>
-  create_hw_context(const xrt::hw_context::temp_elf_type&) const
-  { throw not_supported_error{__func__}; }
-#endif
-
   // Registers an xclbin with shim, but does not load it.
   // This is no-op for most platform shims
   virtual void
