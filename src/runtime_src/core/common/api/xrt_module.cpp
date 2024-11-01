@@ -1377,8 +1377,9 @@ class module_sram : public module_impl
   create_instr_buf(const module_impl* parent)
   {
     XRT_DEBUGF("-> module_sram::create_instr_buf()\n");
-    instr_buf data;
-    std::tie(m_instr_sec_idx, data) = parent->get_instr(m_index);
+    auto instr_buf_info = parent->get_instr(m_index);
+    m_instr_sec_idx = instr_buf_info.first;
+    const instr_buf& data = instr_buf_info.second;
     size_t sz = data.size();
     if (sz == 0)
       throw std::runtime_error("Invalid instruction buffer size");
@@ -1461,8 +1462,9 @@ class module_sram : public module_impl
   void
   create_ctrlpkt_buf(const module_impl* parent)
   {
-    control_packet data;
-    std::tie(m_ctrlpkt_sec_idx, data) = parent->get_ctrlpkt(m_index);
+    auto ctrl_pkt_info = parent->get_ctrlpkt(m_index);
+    m_ctrlpkt_sec_idx = ctrl_pkt_info.first;
+    const control_packet& data = ctrl_pkt_info.second;
     size_t sz = data.size();
 
     if (sz == 0) {
@@ -1788,7 +1790,7 @@ patch(const xrt::module& module, uint8_t* ibuf, size_t* sz, const std::vector<st
   auto os_abi = hdl->get_os_abi();
 
   if (os_abi == Elf_Amd_Aie2p || os_abi == Elf_Amd_Aie2p_config) {
-    const auto& buf_info = hdl->get_instr(idx);
+    auto buf_info = hdl->get_instr(idx);
     patch_index = buf_info.first;
     inst = &(buf_info.second);
   }
