@@ -55,7 +55,7 @@ class kernel : public refcount, public _cl_kernel
   class xargument
   {
   public:
-    using arginfo_type = xrt_core::xclbin::kernel_argument;
+    using arginfo_type = xrt_core::kernel::kernel_argument;
 
     xargument(kernel* kernel, const arginfo_type* ainfo)
       : m_kernel(kernel), m_arginfo(ainfo) {}
@@ -225,7 +225,7 @@ public:
     return range<const size_t*>(m_properties.maxworkgroupsize.data(),m_properties.maxworkgroupsize.data()+3);
   }
 
-  decltype(xrt_core::xclbin::kernel_properties::stringtable)
+  decltype(xrt_core::kerenl::kernel_properties::stringtable)
   get_stringtable() const
   {
     return m_properties.stringtable;
@@ -262,7 +262,7 @@ public:
   set_printf_argument(size_t sz, const void* arg);
 
   // Get argument info meta data for specified argument
-  const xrt_core::xclbin::kernel_argument*
+  const xrt_core::kernel::kernel_argument*
   get_arg_info(unsigned long idx) const;
 
   // Get argument value (if any) for specified argument
@@ -378,7 +378,7 @@ private:
 
   // xclbin meta
   xrt::xclbin::kernel m_xkernel;
-  const xrt_core::xclbin::kernel_properties& m_properties;
+  const xrt_core::kerenl::kernel_properties& m_properties;
 
   xargument_vector_type m_indexed_xargs;
   xargument_vector_type m_rtinfo_xargs;
@@ -389,7 +389,7 @@ private:
   std::map<const device*, xkr> m_xruns;
 
   // Arguments in indexed order per xrt::kernel object
-  using xarg = xrt_core::xclbin::kernel_argument;
+  using xarg = xrt_core::kernel::kernel_argument;
   std::vector<const xarg*> m_arginfo;
 };
 

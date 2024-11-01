@@ -147,7 +147,7 @@ class skd
     void* m_kernel = nullptr;
 
     // Arguments from host and return value offset
-    std::vector<xrt_core::xclbin::kernel_argument> m_kernel_args;
+    std::vector<xrt_core::kernel::kernel_argument> m_kernel_args;
     int m_cmd_boh = -1;
     buf_hdl m_xrt_cmd_bo = nullptr;
     uint32_t *m_args_from_host = nullptr;
@@ -160,8 +160,8 @@ class skd
     int create_softkernelfile(xrtDeviceHandle handle, buf_hdl& bohdl) const;
     int delete_softkernelfile() const;
     int create_softkernel(int *boh);
-    int get_return_offset(const std::vector<xrt_core::xclbin::kernel_argument> &args) const;
-    ffi_type* convert_to_ffitype(const xrt_core::xclbin::kernel_argument &arg) const;
+    int get_return_offset(const std::vector<xrt_core::kernel::kernel_argument> &args) const;
+    ffi_type* convert_to_ffitype(const xrt_core::kernel::kernel_argument &arg) const;
 };
 
 }

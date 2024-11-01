@@ -1288,7 +1288,7 @@ namespace xrt {
 class kernel_impl : public std::enable_shared_from_this<kernel_impl>
 {
 public:
-  using property_type = xrt_core::xclbin::kernel_properties;
+  using property_type = xrt_core::kerenl::kernel_properties;
   using kernel_type = property_type::kernel_type;
   using control_type = xrt::xclbin::ip::control_type;
   using mailbox_type = property_type::mailbox_type;
@@ -1306,7 +1306,7 @@ private:
   xrt::xclbin::kernel xkernel;         // kernel xclbin metadata
   std::vector<argument> args;          // kernel args sorted by argument index
   std::vector<ipctx> ipctxs;           // CU context locks
-  property_type properties;            // Kernel properties from XML meta
+  const property_type& properties;     // Kernel properties from XML meta
   std::bitset<max_cus> cumask;         // cumask for command execution
   size_t regmap_size = 0;              // CU register map size
   size_t fa_num_inputs = 0;            // Fast adapter number of inputs per meta data
@@ -1534,51 +1534,6 @@ private:
     return tokens;
   }
 
-  void
-  construct_elf_kernel_args(const std::string& kernel_name)
-  {
-    // kernel signature - name(argtype, argtype ...)
-    size_t start_pos = kernel_name.find('(');
-    size_t end_pos = kernel_name.find(')', start_pos);
-
-    if (start_pos == std::string::npos || end_pos == std::string::npos || start_pos > end_pos)
-      throw std::runtime_error("Failed to construct kernel args");
-
-    std::string argstring = kernel_name.substr(start_pos + 1, end_pos - start_pos - 1);
-    std::vector<std::string> argstrings = split(argstring, ',');
-
-    size_t count = 0;
-    size_t offset = 0;
-    for (const std::string& str : argstrings) {
-      xrt_core::xclbin::kernel_argument arg;
-      arg.name = "argv" + std::to_string(count);
-      arg.hosttype = "no-type";
-      arg.port = "no-port";
-      arg.index = count;
-      arg.offset = offset;
-      arg.dir = xrt_core::xclbin::kernel_argument::direction::input;
-      // if arg has pointer(*) in its name (eg: char*, void*) it is of type global otherwise scalar
-      arg.type = (str.find('*') != std::string::npos)
-               ? xrt_core::xclbin::kernel_argument::argtype::global
-               : xrt_core::xclbin::kernel_argument::argtype::scalar;
-
-      // At present only global args are supported
-      // TODO : Add support for scalar args in ELF flow
-      if (arg.type == xrt_core::xclbin::kernel_argument::argtype::scalar)
-        throw std::runtime_error("scalar args are not yet supported for this kind of kernel");
-      else {
-        // global arg
-        static constexpr size_t global_arg_size = 0x8;
-        arg.size = global_arg_size;        
-
-        offset += global_arg_size;
-      }
-
-      args.emplace_back(arg);
-      count++;
-    }
-  }
-
 public:
   // kernel_type - constructor
   //
@@ -1662,24 +1617,14 @@ public:
     }
 
     m_module = xrt_core::hw_context_int::get_module(hwctx, name);
-    auto demangled_name = xrt_core::module_int::get_kernel_signature(m_module);
-      
-    // extract kernel name
-    size_t pos = demangled_name.find('(');
-    if (pos == std::string::npos)
-      throw std::runtime_error("Failed to get kernel - " + nm);
-
-    if (name != demangled_name.substr(0, pos))
+    // Get kernel info from module
+    const auto& kernel_info = xrt_core::module_int::get_kernel_info(m_module);
+    if (name != kernel_info.props.name)
       throw std::runtime_error("Kernel name mismatch, incorrect module picked\n");
-    
-    construct_elf_kernel_args(demangled_name);
 
-    // fill kernel properties
-    properties.name = name;
-    properties.type = xrt_core::xclbin::kernel_properties::kernel_type::dpu;
-    properties.counted_auto_restart = xrt_core::xclbin::get_restart_from_ini(name);
-    properties.mailbox = xrt_core::xclbin::get_mailbox_from_ini(name);
-    properties.sw_reset = xrt_core::xclbin::get_sw_reset_from_ini(name);
+    properties = kernel_info.props;
+    for (auto& arg : kernel_info.args)
+      args.emplace_back(arg);
 
     // amend args with computed data based on kernel protocol
     amend_args();
@@ -2663,7 +2608,7 @@ public:
 // register map.
 class mailbox_impl : public run_impl
 {
-  using mailbox_type = xrt_core::xclbin::kernel_properties::mailbox_type;
+  using mailbox_type = xrt_core::kernel::kernel_properties::mailbox_type;
 
   // enum class for mailbox operations
   enum class mailbox_operation {
@@ -3700,7 +3645,7 @@ copy_bo_with_kdma(const std::shared_ptr<xrt_core::device>& core_device,
 #endif
 }
 
-xrt_core::xclbin::kernel_argument::argtype
+xrt_core::kernel::kernel_argument::argtype
 arg_type_at_index(const xrt::kernel& kernel, size_t argidx)
 {
   auto& arg = kernel.get_handle()->get_arg(argidx);
@@ -3745,17 +3690,17 @@ get_control_protocol(const xrt::run& run)
   return run.get_handle()->get_kernel()->get_ip_control_protocol();
 }
 
-std::vector<const xclbin::kernel_argument*>
+std::vector<const kernel::kernel_argument*>
 get_args(const xrt::kernel& kernel)
 {
   const auto& args = kernel.get_handle()->get_args();
-  std::vector<const xclbin::kernel_argument*> vec;
+  std::vector<const kernel::kernel_argument*> vec;
   for (const auto& arg : args)
     vec.push_back(&arg.get_xarg());
   return vec;
 }
 
-const xclbin::kernel_argument*
+const kernel::kernel_argument*
 get_arg_info(const xrt::run& run, size_t argidx)
 {
   auto& arg = run.get_handle()->get_kernel()->get_arg(argidx);

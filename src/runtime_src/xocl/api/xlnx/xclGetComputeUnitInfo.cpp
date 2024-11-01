@@ -90,10 +90,10 @@ xclGetComputeUnitInfo(cl_kernel             kernel,
     case XCL_COMPUTE_UNIT_CONNECTIONS: {
       int argidx = 0;
       for (auto& arg : cu->get_args()) {
-        if (arg.index == xrt_core::xclbin::kernel_argument::no_index)
+        if (arg.index == xrt_core::kernel::kernel_argument::no_index)
           continue;
-        if (arg.type == xrt_core::xclbin::kernel_argument::argtype::global
-            ||arg.type == xrt_core::xclbin::kernel_argument::argtype::constant) {
+        if (arg.type == xrt_core::kernel::kernel_argument::argtype::global
+            ||arg.type == xrt_core::kernel::kernel_argument::argtype::constant) {
           auto memidx = cu->get_memidx(argidx);
           buffer.as<cl_ulong>() = memidx.to_ulong();
         }

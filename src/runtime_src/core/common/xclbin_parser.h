@@ -20,6 +20,7 @@
 #include "cuidx_type.h"
 #include "core/include/xclbin.h"
 #include "core/include/xrt/xrt_uuid.h"
+#include "kernel.h"
 
 #include <array>
 #include <limits>
@@ -30,53 +31,10 @@
 
 namespace xrt_core { namespace xclbin {
 
-// struct kernel_argument - kernel argument meta data
-struct kernel_argument
-{
-  static constexpr size_t no_index { std::numeric_limits<size_t>::max() };
-  // numbering must match that of meta data addressQualifier
-  enum class argtype { scalar = 0, global = 1, constant=2, local=3, stream = 4 };
-  enum class direction { input = 0, output = 1};
-
-  std::string name;
-  std::string hosttype;
-  std::string port;
-  size_t port_width = 0;
-  size_t index = no_index;
-  size_t offset = 0;
-  size_t size = 0;
-  size_t hostsize = 0;
-  size_t fa_desc_offset = 0;
-  argtype type;
-  direction dir;
-};
-
-// struct kernel_properties - kernel property metadata
-struct kernel_properties
-{
-  enum class kernel_type { none, pl, ps, dpu };
-  enum class mailbox_type { none, in , out, inout };
-  using restart_type = size_t;
-  std::string name;
-  kernel_type type = kernel_type::none;
-  restart_type counted_auto_restart = 0;
-  mailbox_type mailbox = mailbox_type::none;
-  size_t address_range = 0x10000;  // NOLINT, default address range
-  bool sw_reset = false;
-  size_t functional = 0;
-  size_t kernel_id = 0;
-
-  // opencl specifics
-  size_t workgroupsize = 0;
-  std::array<size_t, 3> compileworkgroupsize {0};
-  std::array<size_t, 3> maxworkgroupsize {0};
-  std::map<uint32_t, std::string> stringtable;
-};
-
 struct kernel_object
 {
   std::string name;
-  std::vector<kernel_argument> args;
+  std::vector<xrt_core::kernel::kernel_argument> args;
   size_t range;
   bool sw_reset;
 };
@@ -335,7 +293,7 @@ get_kernel_freq(const axlf* top);
  * Return: List of argument per struct kernel_argument
  */
 XRT_CORE_COMMON_EXPORT
-std::vector<kernel_argument>
+std::vector<xrt_core::kernel::kernel_argument>
 get_kernel_arguments(const char* xml_data, size_t xml_size, const std::string& kname);
 
 
@@ -346,7 +304,7 @@ get_kernel_arguments(const char* xml_data, size_t xml_size, const std::string& k
  * Return: List of argument per struct kernel_argument
  */
 XRT_CORE_COMMON_EXPORT
-std::vector<kernel_argument>
+std::vector<xrt_core::kernel::kernel_argument>
 get_kernel_arguments(const axlf* top, const std::string& kname);
 
 /**
@@ -369,7 +327,7 @@ get_kernel_properties(const char* xml_data, size_t xml_size, const std::string& 
  * Return: Properties for kernel extracted from XML meta data
  */
 XRT_CORE_COMMON_EXPORT
-kernel_properties
+kernel::kernel_properties
 get_kernel_properties(const axlf* top, const std::string& kname);
 
 /**
@@ -423,15 +381,6 @@ get_project_name(const axlf* top);
  */
 std::string
 get_fpga_device_name(const char* xml_data, size_t xml_size);
-
-kernel_properties::mailbox_type
-get_mailbox_from_ini(const std::string& kname);
-
-kernel_properties::restart_type
-get_restart_from_ini(const std::string& kname);
-
-bool
-get_sw_reset_from_ini(const std::string& kname);
 
 }} // xclbin, xrt_core
 

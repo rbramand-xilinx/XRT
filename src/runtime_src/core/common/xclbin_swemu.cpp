@@ -126,12 +126,12 @@ static std::vector<char>
 get_connectivity(const axlf* top, const ip_layout* ip_layout)
 {
   // for each kernel, lookup arguments
-  std::map<std::string, std::vector<xrt_core::xclbin::kernel_argument>> k2args;
+  std::map<std::string, std::vector<xrt_core::kernel::kernel_argument>> k2args;
   for (auto& k : xrt_core::xclbin::get_kernels(top)) {
     auto& args = k.args;
     // remove non-indexed args
     args.erase(std::remove_if(args.begin(), args.end(), [] (auto& arg) {
-          return arg.index == xrt_core::xclbin::kernel_argument::no_index;
+          return arg.index == xrt_core::kernel::kernel_argument::no_index;
         }),args.end());
     k2args.emplace(std::make_pair(std::move(k.name), std::move(args)));
   }

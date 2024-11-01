@@ -187,11 +187,11 @@ namespace xdp {
     for (auto device : platform->get_device_range()) {
       for (auto& cu : xocl::xocl(device)->get_cus()) {
         for (const auto& arg : cu->get_args()) {
-          if (arg.index == xrt_core::xclbin::kernel_argument::no_index)
+          if (arg.index == xrt_core::kernel::kernel_argument::no_index)
             continue;
 
-          if (arg.type != xrt_core::xclbin::kernel_argument::argtype::global
-              && arg.type != xrt_core::xclbin::kernel_argument::argtype::stream)
+          if (arg.type != xrt_core::kernel::kernel_argument::argtype::global
+              && arg.type != xrt_core::kernel::kernel_argument::argtype::stream)
             continue;
 
           std::string bitWidth = "" ;

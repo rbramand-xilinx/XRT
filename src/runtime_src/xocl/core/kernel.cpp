@@ -278,7 +278,7 @@ set_printf_argument(size_t sz, const void* cvalue)
   m_printf_xargs.at(0)->set(cvalue, sz);
 }
 
-const xrt_core::xclbin::kernel_argument*
+const xrt_core::kernel::kernel_argument*
 kernel::
 get_arg_info(unsigned long idx) const
 {

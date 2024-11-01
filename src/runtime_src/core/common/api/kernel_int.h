@@ -31,11 +31,11 @@ copy_bo_with_kdma(const std::shared_ptr<xrt_core::device>& core_device,
                   buffer_handle* src_bo, size_t src_offset);
 
 XRT_CORE_COMMON_EXPORT
-std::vector<const xclbin::kernel_argument*>
+std::vector<const kernel::kernel_argument*>
 get_args(const xrt::kernel&);
 
 XRT_CORE_COMMON_EXPORT
-const xclbin::kernel_argument*
+const kernel::kernel_argument*
 get_arg_info(const xrt::run& run, size_t argidx);
 
 XRT_CORE_COMMON_EXPORT
@@ -43,7 +43,7 @@ std::vector<uint32_t>
 get_arg_value(const xrt::run&, size_t argidx);
 
 XRT_CORE_COMMON_EXPORT
-xrt_core::xclbin::kernel_argument::argtype
+xrt_core::kernel::kernel_argument::argtype
 arg_type_at_index(const xrt::kernel& kernel, size_t idx);
 
 XRT_CORE_COMMON_EXPORT

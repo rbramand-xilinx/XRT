@@ -105,7 +105,7 @@ kernel_start::kernel_start(std::shared_ptr<stream> s, std::shared_ptr<function> 
   // create run object and set args
   r = xrt::run(k);
 
-  using karg = xrt_core::xclbin::kernel_argument;
+  using karg = xrt_core::kernel::kernel_argument;
   int idx = 0;
   for (const auto& arg : xrt_core::kernel_int::get_args(k)) {
     // non index args are not supported, this condition will not hit in case of HIP

@@ -967,17 +967,17 @@ getArgValueString(const xocl::event* aEvent)
   for (auto& arg : kernel->get_indexed_xargument_range()) {
     sstr << arg->get_name() << " = ";
     switch (arg->get_argtype()) {
-    case xrt_core::xclbin::kernel_argument::argtype::scalar:
+    case xrt_core::kernel::kernel_argument::argtype::scalar:
       sstr << getScalarArgValue(kernel, arg.get());
       break;
-    case xrt_core::xclbin::kernel_argument::argtype::global:
-    case xrt_core::xclbin::kernel_argument::argtype::constant:
+    case xrt_core::kernel::kernel_argument::argtype::global:
+    case xrt_core::kernel::kernel_argument::argtype::constant:
       sstr << getGlobalArgValue(kernel, arg.get());
       break;
-    case xrt_core::xclbin::kernel_argument::argtype::stream:
+    case xrt_core::kernel::kernel_argument::argtype::stream:
       sstr << "stream arg";
       break;
-    case xrt_core::xclbin::kernel_argument::argtype::local:
+    case xrt_core::kernel::kernel_argument::argtype::local:
       sstr << "local arg";
       break;
     }

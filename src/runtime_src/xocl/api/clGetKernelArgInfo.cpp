@@ -67,7 +67,7 @@ clGetKernelArgInfo(cl_kernel          kernel ,
   validOrError(kernel,arg_indx,param_name,param_value_size,param_value,param_value_size_ret);
 
   xocl::param_buffer buffer { param_value, param_value_size, param_value_size_ret };
-  const xrt_core::xclbin::kernel_argument* arginfo = xocl::xocl(kernel)->get_arg_info(arg_indx);
+  const xrt_core::kernel::kernel_argument* arginfo = xocl::xocl(kernel)->get_arg_info(arg_indx);
 
   switch(param_name) {
     case CL_KERNEL_ARG_ADDRESS_QUALIFIER:

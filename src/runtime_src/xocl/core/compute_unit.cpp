@@ -97,7 +97,7 @@ get_memidx_intersect() const
 
   m_memidx.set(); // all bits true
   for (auto& arg : xrt_core::xclbin_int::get_arginfo(m_xkernel)) {
-    using kernel_argument = xrt_core::xclbin::kernel_argument;
+    using kernel_argument = xrt_core::kernel::kernel_argument;
     if (arg.index == kernel_argument::no_index)
       continue;
     if (arg.type == kernel_argument::argtype::global || arg.type == kernel_argument::argtype::constant)

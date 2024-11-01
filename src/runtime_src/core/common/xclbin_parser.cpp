@@ -38,7 +38,7 @@
 namespace {
 
 namespace pt = boost::property_tree;
-using kernel_type = xrt_core::xclbin::kernel_properties::kernel_type;
+using kernel_type = xrt_core::kernel::kernel_properties::kernel_type;
 
 // NOLINTNEXTLINE
 constexpr size_t operator"" _kb(unsigned long long v)  { return 1024u * v; }
@@ -68,17 +68,17 @@ to_bool(const std::string& str)
   return str == "true" ? true : false;
 }
 
-static xrt_core::xclbin::kernel_properties::mailbox_type
+static xrt_core::kernel::kernel_properties::mailbox_type
 convert_to_mailbox_type(const std::string& str)
 {
-  static std::map<std::string, xrt_core::xclbin::kernel_properties::mailbox_type> table = {
-    { "none", xrt_core::xclbin::kernel_properties::mailbox_type::none },
-    { "in", xrt_core::xclbin::kernel_properties::mailbox_type::in },
-    { "out", xrt_core::xclbin::kernel_properties::mailbox_type::out },
-    { "inout", xrt_core::xclbin::kernel_properties::mailbox_type::inout },
-    { "both", xrt_core::xclbin::kernel_properties::mailbox_type::inout },
-    { "true", xrt_core::xclbin::kernel_properties::mailbox_type::inout },
-    { "false", xrt_core::xclbin::kernel_properties::mailbox_type::none },
+  static std::map<std::string, xrt_core::kernel::kernel_properties::mailbox_type> table = {
+    { "none", xrt_core::kernel::kernel_properties::mailbox_type::none },
+    { "in", xrt_core::kernel::kernel_properties::mailbox_type::in },
+    { "out", xrt_core::kernel::kernel_properties::mailbox_type::out },
+    { "inout", xrt_core::kernel::kernel_properties::mailbox_type::inout },
+    { "both", xrt_core::kernel::kernel_properties::mailbox_type::inout },
+    { "true", xrt_core::kernel::kernel_properties::mailbox_type::inout },
+    { "false", xrt_core::kernel::kernel_properties::mailbox_type::none },
   };
   auto itr = table.find(str);
   if (itr == table.end())
@@ -319,7 +319,7 @@ get_portname_width_map(const pt::ptree& xml_kernel)
 // Post-condition:
 //  - all indexed args are stored in vector at same index
 static void
-merge_args(std::vector<xrt_core::xclbin::kernel_argument>& args)
+merge_args(std::vector<xrt_core::kernel::kernel_argument>& args)
 {
   for (size_t idx = 0; idx < args.size(); ++idx) {
     // first component of argument with argidx
@@ -327,7 +327,7 @@ merge_args(std::vector<xrt_core::xclbin::kernel_argument>& args)
 
     // dont merge no_index args which are guarateed to be sorted to
     // end of args
-    if (arg.index == xrt_core::xclbin::kernel_argument::no_index)
+    if (arg.index == xrt_core::kernel::kernel_argument::no_index)
       break;
 
     // for all elements with same index as arg
@@ -350,7 +350,7 @@ merge_args(std::vector<xrt_core::xclbin::kernel_argument>& args)
   // assert post condition
   size_t argidx = 0;
   for (auto& arg : args)
-    if (arg.index != argidx++ && arg.index != xrt_core::xclbin::kernel_argument::no_index)
+    if (arg.index != argidx++ && arg.index != xrt_core::kernel::kernel_argument::no_index)
       throw std::runtime_error("xclbin parser internal error: mismatched argument index");
 }
 
@@ -892,10 +892,10 @@ get_kernel_freq(const axlf* top)
   return kernel_clk_freq;
 }
 
-std::vector<kernel_argument>
+std::vector<xrt_core::kernel::kernel_argument>
 get_kernel_arguments(const char* xml_data, size_t xml_size, const std::string& kname)
 {
-  std::vector<kernel_argument> args;
+  std::vector<xrt_core::kernel::kernel_argument> args;
 
   pt::ptree xml_project;
   std::stringstream xml_stream;
@@ -915,13 +915,13 @@ get_kernel_arguments(const char* xml_data, size_t xml_size, const std::string& k
         continue;
 
       std::string id = xml_arg.second.get<std::string>("<xmlattr>.id");
-      size_t index = id.empty() ? kernel_argument::no_index : convert(id);
+      size_t index = id.empty() ? xrt_core::kernel::kernel_argument::no_index : convert(id);
 
       std::string port = xml_arg.second.get<std::string>("<xmlattr>.port", "no-port");
       auto itr = pwmap.find(port);
       size_t pwidth = (itr != pwmap.end()) ? (*itr).second : 0;
 
-      args.emplace_back(kernel_argument{
+      args.emplace_back(xrt_core::kernel::kernel_argument{
           xml_arg.second.get<std::string>("<xmlattr>.name")
          ,xml_arg.second.get<std::string>("<xmlattr>.type", "no-type")
          ,port
@@ -931,8 +931,8 @@ get_kernel_arguments(const char* xml_data, size_t xml_size, const std::string& k
          ,convert(xml_arg.second.get<std::string>("<xmlattr>.size"))
          ,convert(xml_arg.second.get<std::string>("<xmlattr>.hostSize"))
          ,0  // fa_desc_offset post computed if necessary
-         ,kernel_argument::argtype(xml_arg.second.get<size_t>("<xmlattr>.addressQualifier"))
-         ,kernel_argument::direction(kernel_argument::direction::input)
+         ,xrt_core::kernel::kernel_argument::argtype(xml_arg.second.get<size_t>("<xmlattr>.addressQualifier"))
+         ,xrt_core::kernel::kernel_argument::direction(xrt_core::kernel::kernel_argument::direction::input)
       });
     }
 
@@ -948,7 +948,7 @@ get_kernel_arguments(const char* xml_data, size_t xml_size, const std::string& k
   return args;
 }
 
-std::vector<kernel_argument>
+std::vector<xrt_core::kernel::kernel_argument>
 get_kernel_arguments(const axlf* top, const std::string& kname)
 {
   auto xml = get_xml_section(top);
@@ -959,18 +959,20 @@ get_kernel_arguments(const axlf* top, const std::string& kname)
 // Needed until meta-data support (Vitis-1147)
 // Format is "[/kernel_name/]*"
 // mailbox="/kernel1_name/kernel2_name/"
-kernel_properties::mailbox_type
+kernel::kernel_properties::mailbox_type
+kernel::
 get_mailbox_from_ini(const std::string& kname)
 {
   static auto mailbox_kernels = xrt_core::config::get_mailbox_kernels();
   return (mailbox_kernels.find("/" + kname + "/") != std::string::npos)
-    ? xrt_core::xclbin::kernel_properties::mailbox_type::inout
-    : xrt_core::xclbin::kernel_properties::mailbox_type::none;
+    ? xrt_core::kernel::kernel_properties::mailbox_type::inout
+    : xrt_core::kernel::kernel_properties::mailbox_type::none;
 }
 
 // Kernel auto restart counter offset
 // Needed until meta-data support (Vitis-1147)
-kernel_properties::restart_type
+kernel::kernel_properties::restart_type
+kernel::
 get_restart_from_ini(const std::string& kname)
 {
   static auto restart_kernels = xrt_core::config::get_auto_restart_kernels();
@@ -981,13 +983,14 @@ get_restart_from_ini(const std::string& kname)
 
 // Kernel software reset
 bool
+kernel::
 get_sw_reset_from_ini(const std::string& kname)
 {
   static auto reset_kernels = xrt_core::config::get_sw_reset_kernels();
   return (reset_kernels.find("/" + kname + "/") != std::string::npos);
 }
 
-kernel_properties
+kernel::kernel_properties
 get_kernel_properties(const char* xml_data, size_t xml_size, const std::string& kname)
 {
   pt::ptree xml_project;
@@ -1003,14 +1006,14 @@ get_kernel_properties(const char* xml_data, size_t xml_size, const std::string& 
 
     // Determine features
     auto mailbox = convert_to_mailbox_type(xml_kernel.second.get<std::string>("<xmlattr>.mailbox", "none"));
-    if (mailbox == kernel_properties::mailbox_type::none)
-      mailbox = get_mailbox_from_ini(kname);
+    if (mailbox == kernel::kernel_properties::mailbox_type::none)
+      mailbox = kernel::get_mailbox_from_ini(kname);
     auto restart = convert(xml_kernel.second.get<std::string>("<xmlattr>.countedAutoRestart", "0"));
     if (restart == 0)
-      restart = get_restart_from_ini(kname);
+      restart = kernel::get_restart_from_ini(kname);
     auto sw_reset = to_bool(xml_kernel.second.get<std::string>("<xmlattr>.swReset", "false"));
     if (!sw_reset)
-      sw_reset = get_sw_reset_from_ini(kname);
+      sw_reset = kernel::get_sw_reset_from_ini(kname);
 
     auto functional = get_functional(xml_kernel.second, "extended-data");
     auto kernel_id = get_kernel_id(xml_kernel.second, "extended-data");

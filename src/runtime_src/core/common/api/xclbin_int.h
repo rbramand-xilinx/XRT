@@ -43,14 +43,14 @@ read_xclbin(const std::string& fnm);
 
 // get_properties() - Get kernel properties
 XRT_CORE_COMMON_EXPORT
-const xrt_core::xclbin::kernel_properties&
+const xrt_core::kernel::kernel_properties&
 get_properties(const xrt::xclbin::kernel& kernel);
 
 // get_arginfo() - Get xclbin kernel argument metadata
 // Sorted by arg index, but appended with rtinfo args (if any)
 // which have no index
 XRT_CORE_COMMON_EXPORT
-const std::vector<xrt_core::xclbin::kernel_argument>&
+const std::vector<xrt_core::kernel::kernel_argument>&
 get_arginfo(const xrt::xclbin::kernel& kernel);
 
 // get_membank_encoding() - Retrive membank encoding

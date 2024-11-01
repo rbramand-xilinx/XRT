@@ -180,7 +180,7 @@ class xclbin::arg_impl
 {
 public: // purposely not a struct to match decl in xrt_xclbin.h
   std::set<xclbin::mem> m_mems;
-  const xrt_core::xclbin::kernel_argument* m_arginfo = nullptr;
+  const xrt_core::kernel::kernel_argument* m_arginfo = nullptr;
 
 public:
   void
@@ -196,7 +196,7 @@ public:
   }
 
   void
-  add_arginfo(const xrt_core::xclbin::kernel_argument* arginfo)
+  add_arginfo(const xrt_core::kernel::kernel_argument* arginfo)
   {
     m_arginfo = arginfo;
   }
@@ -293,16 +293,16 @@ class xclbin::kernel_impl
 {
 public: // purposely not a struct to match decl in xrt_xclbin.h
   std::string m_name;
-  xrt_core::xclbin::kernel_properties m_properties;
+  xrt_core::kerenl::kernel_properties m_properties;
   std::vector<xclbin::ip> m_cus;
   std::vector<xclbin::arg> m_args;
-  std::vector<xrt_core::xclbin::kernel_argument> m_arginfo;
+  std::vector<xrt_core::kernel::kernel_argument> m_arginfo;
 
 public:
   kernel_impl(std::string&& nm,
-              xrt_core::xclbin::kernel_properties&& props,
+              xrt_core::kernel::kernel_properties&& props,
               std::vector<xclbin::ip>&& cus,
-              std::vector<xrt_core::xclbin::kernel_argument>&& arguments)
+              std::vector<xrt_core::kernel::kernel_argument>&& arguments)
     : m_name(std::move(nm))
     , m_properties(std::move(props))
     , m_cus(std::move(cus))
@@ -314,7 +314,7 @@ public:
       const auto& karginfo = m_arginfo[argidx];
 
       // OpenCL rtinfo argument
-      if (karginfo.index == xrt_core::xclbin::kernel_argument::no_index)
+      if (karginfo.index == xrt_core::kernel::kernel_argument::no_index)
         continue;
 
       // Sanity check
@@ -1343,7 +1343,7 @@ size_t
 xclbin::arg::
 get_index() const
 {
-  return handle && handle->m_arginfo ? handle->m_arginfo->index : xrt_core::xclbin::kernel_argument::no_index;
+  return handle && handle->m_arginfo ? handle->m_arginfo->index : xrt_core::kernel::kernel_argument::no_index;
 }
 ////////////////////////////////////////////////////////////////
 // xrt::xclbin::mem
@@ -1583,13 +1583,13 @@ read_xclbin(const std::string& fnm)
   return ::read_xclbin(fnm);
 }
 
-const xrt_core::xclbin::kernel_properties&
+const xrt_core::kerenl::kernel_properties&
 get_properties(const xrt::xclbin::kernel& kernel)
 {
   return kernel.get_handle()->m_properties;
 }
 
-const std::vector<xrt_core::xclbin::kernel_argument>&
+const std::vector<xrt_core::kernel::kernel_argument>&
 get_arginfo(const xrt::xclbin::kernel& kernel)
 {
   return kernel.get_handle()->m_arginfo;

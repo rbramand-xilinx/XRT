@@ -89,7 +89,7 @@ namespace xrt {
       m_sk_meta_bo = nullptr;
       return -errno;
     }
-    m_kernel_args = xrt_core::xclbin::get_kernel_arguments(buf, size, m_sk_name);
+    m_kernel_args = xrt_core::kernel::get_kernel_arguments(buf, size, m_sk_name);
     m_return_offset = get_return_offset(m_kernel_args);
     const auto msg = boost::format("Return offset = %s") % std::to_string(m_return_offset);
     xrt_core::message::send(severity_level::debug, "SKD", msg.str());
@@ -225,7 +225,7 @@ namespace xrt {
       // Map buffers used by kernel
       for(int i=0;i<m_kernel_args.size();i++) {
 	// If argument does not have index and is of hosttype xrtHandles, m_xrtHandle is passed as part of the kernel argument
-	if((m_kernel_args[i].index == xrt_core::xclbin::kernel_argument::no_index) && (m_kernel_args[i].hosttype.compare("xrtHandles*")==0)) {
+	if((m_kernel_args[i].index == xrt_core::kernel::kernel_argument::no_index) && (m_kernel_args[i].hosttype.compare("xrtHandles*")==0)) {
 	  ffi_arg_values[i] = &m_xrtHandle;
 	  continue;
 	}
@@ -233,7 +233,7 @@ namespace xrt {
 	// Offset is in bytes, so need to divide by 4 to get dword offset
 	const int arg_offset = (m_kernel_args[i].offset + PS_KERNEL_REG_OFFSET) / 4;
 	// If its a global argument, that means it is a buffer with physical address(64-bit) and size(64-bit)
-	if(m_kernel_args[i].type == xrt_core::xclbin::kernel_argument::argtype::global) {
+	if(m_kernel_args[i].type == xrt_core::kernel::kernel_argument::argtype::global) {
 	  auto buf_addr_ptr = reinterpret_cast<uint64_t *>(&m_args_from_host[arg_offset]);
 	  auto buf_addr = reinterpret_cast<uint64_t>(*buf_addr_ptr);
 	  auto buf_size_ptr = reinterpret_cast<uint64_t *>(&m_args_from_host[arg_offset + 2]);
@@ -395,7 +395,7 @@ namespace xrt {
   }
 
   // Convert argument to ffi_type 
-  ffi_type* skd::convert_to_ffitype(const xrt_core::xclbin::kernel_argument &arg) const
+  ffi_type* skd::convert_to_ffitype(const xrt_core::kernel::kernel_argument &arg) const
   {
     ffi_type* return_type;
     // Mapping for FFI types
@@ -423,8 +423,8 @@ namespace xrt {
       { {"double", 8 }, &ffi_type_double }
     };
 
-    if ((arg.index == xrt_core::xclbin::kernel_argument::no_index) ||  // Argument is xrtHandles
-       (arg.type == xrt_core::xclbin::kernel_argument::argtype::global)) {  // Argument is a buffer pointer
+    if ((arg.index == xrt_core::kernel::kernel_argument::no_index) ||  // Argument is xrtHandles
+       (arg.type == xrt_core::kernel::kernel_argument::argtype::global)) {  // Argument is a buffer pointer
       return_type = &ffi_type_pointer;
       return return_type;
     } else {
@@ -443,12 +443,12 @@ namespace xrt {
     xclSKReport(m_devhdl,m_cu_idx,XRT_SCU_STATE_CRASH);
   }
 
-  int skd::get_return_offset(const std::vector<xrt_core::xclbin::kernel_argument> &args) const
+  int skd::get_return_offset(const std::vector<xrt_core::kernel::kernel_argument> &args) const
   {
     // Calculate offset to write return code into
     // If the last argument is a global which means there will be 64-bit address and 64-bit size for total of 16 bytes
     // Else the last argument size will be either 4-bytes or 8 bytes since arguments are 32-bit aligned
-    auto last_arg_size = (args.back().type == xrt_core::xclbin::kernel_argument::argtype::global) ? 16 : (args.back().size > 4) ? 8 : 4;
+    auto last_arg_size = (args.back().type == xrt_core::kernel::kernel_argument::argtype::global) ? 16 : (args.back().size > 4) ? 8 : 4;
     return (args.back().offset + PS_KERNEL_REG_OFFSET + last_arg_size) / 4;
   }
 

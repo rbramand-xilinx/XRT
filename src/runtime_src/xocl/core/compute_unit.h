@@ -119,7 +119,7 @@ public:
     return m_xkernel.get_handle().get();  // really the kernel id as void* impl pointer?
   }
 
-  const std::vector<xrt_core::xclbin::kernel_argument>&
+  const std::vector<xrt_core::kernel::kernel_argument>&
   get_args() const
   {
     return xrt_core::xclbin_int::get_arginfo(m_xkernel);
