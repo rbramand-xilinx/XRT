@@ -1505,6 +1505,7 @@ private:
     return data;  // no skipping
   }
 
+#if 0
   static xrt::module
   get_module(const xrt::hw_context& ctx, const std::string& kname)
   {
@@ -1517,6 +1518,15 @@ private:
     }
     else
       return xrt_core::hw_context_int::get_module(ctx, kname.substr(0, i));
+  }
+#endif
+
+  static uint32_t
+  get_ctrlcode_idx(const std::string& name)
+  {
+    if (auto i = name.find(":"); i != std::string::npos)
+      return std::stoul(name.substr(i+1, name.size()-i-1));
+    return 0; // default case
   }
 
   static uint32_t
@@ -1595,26 +1605,35 @@ public:
   }
 
   kernel_impl(std::shared_ptr<device_type> dev, xrt::hw_context ctx, const std::string& nm)
-    : device(std::move(dev))                                            // share ownership
+    : name(nm.substr(0, nm.find(":")))
+    , device(std::move(dev))                                            // share ownership
     , hwctx(std::move(ctx))                                             // hw context
     , hwqueue(hwctx)                                                    // hw queue
-    , m_module(get_module(hwctx, nm))                                   // module object with matching kernel name
+    //, m_module(get_module(hwctx, nm))                                   // module object with matching kernel name
+    , m_module(xrt_core::hw_context_int::get_module(hwctx, nm.substr(0, nm.find(":"))))                                   // module object with matching kernel name
     , properties(xrt_core::module_int::get_kernel_info(m_module).props) // kernel info present in Elf
     , uid(create_uid())
+    , m_ctrl_code_index(get_ctrlcode_idx(nm))
   {
     XRT_DEBUGF("kernel_impl::kernel_impl(%d)\n", uid);
 
     // initialize kernel name and ctrl code index
+#if 0
     auto i = nm.find(":");
     if (i == std::string::npos) {
       // default case - ctrl code 0 will be used
-      name = nm.substr(0, nm.size());
+      //name = nm.substr(0, nm.size());
       m_ctrl_code_index = 0;
     }
     else {
-      name = nm.substr(0, i);
+      //name = nm.substr(0, i);
       m_ctrl_code_index = std::stoul(nm.substr(i+1, nm.size()-i-1));
     }
+//#endif
+
+    if (auto i = nm.find(":"); i != std::string::npos)
+      m_ctrl_code_index = std::stoul(nm.substr(i+1, nm.size()-i-1));
+#endif
 
     // initialize kernel args
     for (auto& arg : xrt_core::module_int::get_kernel_info(m_module).args)
