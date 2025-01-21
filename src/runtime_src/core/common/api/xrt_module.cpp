@@ -33,8 +33,6 @@
 #include <string>
 #include <string_view>
 #include <sstream>
-#include <tuple>
-#include <type_traits>
 #include <unordered_set>
 
 #ifdef _WIN32
@@ -54,7 +52,7 @@ namespace
 // Control code is padded to page size, where page size is
 // 0 if no padding is required.   The page size should be
 // embedded as ELF metadata in the future.
-static constexpr size_t elf_page_size = AIE_COLUMN_PAGE_SIZE;
+static constexpr size_t column_page_size = AIE_COLUMN_PAGE_SIZE;
 static constexpr uint8_t Elf_Amd_Aie2p        = 69;
 static constexpr uint8_t Elf_Amd_Aie2ps       = 64;
 static constexpr uint8_t Elf_Amd_Aie2p_config = 70;
@@ -79,13 +77,13 @@ struct buf
     m_data.insert(m_data.end(), sdata, sdata + sz);
   }
 
-  size_t
+  [[nodiscard]] size_t
   size() const
   {
     return m_data.size();
   }
 
-  const uint8_t*
+  [[nodiscard]] const uint8_t*
   data() const
   {
     return m_data.data();
@@ -100,10 +98,10 @@ struct buf
   void
   pad_to_page(uint32_t page)
   {
-    if (!elf_page_size)
+    if (!column_page_size)
       return;
 
-    auto pad = (page + 1) * elf_page_size;
+    auto pad = (page + 1) * column_page_size;
 
     if (m_data.size() > pad)
       throw std::runtime_error("Invalid ELF section size");
@@ -173,17 +171,16 @@ struct patcher
   inline static const std::string_view
   to_string(buf_type bt)
   {
-    static constexpr std::array<std::string_view, static_cast<int>(buf_type::buf_type_count)> section_name_array = {
-      ".ctrltext",
-      ".ctrldata",
-      ".preempt_save",
-      ".preempt_restore",
-      ".pdi",
-      ".ctrlpkt.pm",
-      ".pad"
-    };
+    static constexpr std::array<std::string_view, static_cast<int>(buf_type::buf_type_count)> Section_Name_Array =
+      { ".ctrltext",
+        ".ctrldata",
+        ".preempt_save",
+        ".preempt_restore",
+        ".pdi",
+        ".ctrlpkt.pm",
+        ".pad"};
 
-    return section_name_array[static_cast<int>(bt)];
+    return Section_Name_Array[static_cast<int>(bt)];
   }
 
   patcher(symbol_type type, std::vector<patch_info> ctrlcode_offset, buf_type t)
@@ -402,7 +399,7 @@ public:
   module_impl& operator=(const module_impl&) = delete;
   module_impl& operator=(module_impl&&) = delete;
 
-  xrt::uuid
+  [[nodiscard]] xrt::uuid
   get_cfg_uuid() const
   {
     return m_cfg_uuid;
@@ -411,7 +408,7 @@ public:
   // Get raw instruction buffer data for all columns or for
   // single partition.  The returned vector has the control
   // code as extracted from ELF or userptr.
-  virtual const std::vector<ctrlcode>&
+  [[nodiscard]] virtual const std::vector<ctrlcode>&
   get_data() const
   {
     throw std::runtime_error("Not supported");
@@ -447,7 +444,7 @@ public:
     throw std::runtime_error("Not supported");
   }
 
-  virtual size_t
+  [[nodiscard]] virtual size_t
   get_scratch_pad_mem_size() const
   {
     throw std::runtime_error("Not supported");
@@ -459,25 +456,25 @@ public:
     throw std::runtime_error("Not supported");
   }
 
-  virtual const std::set<std::string>&
+  [[nodiscard]] virtual const std::set<std::string>&
   get_ctrlpkt_pm_dynsyms() const
   {
     throw std::runtime_error("Not supported");
   }
 
-  virtual const std::map<std::string, buf>&
+  [[nodiscard]] virtual const std::map<std::string, buf>&
   get_ctrlpkt_pm_bufs() const
   {
     throw std::runtime_error("Not supported");
   }
 
-  virtual xrt::bo&
+  [[nodiscard]] virtual xrt::bo&
   get_scratch_pad_mem()
   {
     throw std::runtime_error("Not supported");
   }
 
-  virtual xrt::hw_context
+  [[nodiscard]] virtual xrt::hw_context
   get_hw_context() const
   {
     return {};
@@ -492,7 +489,7 @@ public:
     throw std::runtime_error("Not supported");
   }
 
-  virtual uint8_t
+  [[nodiscard]] virtual uint8_t
   get_os_abi() const
   {
     throw std::runtime_error("Not supported");
@@ -552,7 +549,7 @@ public:
   // Get the number of patchers for arguments.  The returned
   // value is the number of arguments that must be patched before
   // the control code can be executed.
-  virtual size_t
+  [[nodiscard]] virtual size_t
   number_of_arg_patchers() const
   {
     return 0;
@@ -615,7 +612,7 @@ public:
     : module_userptr(static_cast<const char*>(userptr), sz, uuid)
   {}
 
-  const std::vector<ctrlcode>&
+  [[nodiscard]] const std::vector<ctrlcode>&
   get_data() const override
   {
     return m_ctrlcode;
@@ -1227,7 +1224,7 @@ class module_elf_aie2ps : public module_elf
   initialize_column_ctrlcode(std::vector<size_t>& pad_offsets)
   {
     // Elf sections for a single page
-    struct elf_page
+    struct column_page
     {
       ELFIO::section* ctrltext = nullptr;
       ELFIO::section* ctrldata = nullptr;
@@ -1235,10 +1232,10 @@ class module_elf_aie2ps : public module_elf
 
     // Elf sections for a single column, the column control code is
     // divided into pages of some architecture defined size.
-    struct elf_sections
+    struct column_sections
     {
       using page_index = uint32_t;
-      std::map<page_index, elf_page> pages;
+      std::map<page_index, column_page> pages;
     };
 
     // Elf ctrl code for a partition spanning multiple uC, where each
@@ -1246,44 +1243,41 @@ class module_elf_aie2ps : public module_elf
     // partition is not divided into multiple controllers, there will
     // be just one entry in the associative map.
     // ucidx -> [page -> [ctrltext, ctrldata]]
-    using uc_index = uint32_t;
-    std::map<uc_index, elf_sections> uc_sections;
+    using column_index  = uint32_t;
+    std::map<column_index, column_sections> col_secs;
 
     // Iterate sections in elf, collect ctrltext and ctrldata
     // per column and page
     for (const auto& sec : m_elfio.sections) {
       auto name = sec->get_name();
       if (name.find(patcher::to_string(patcher::buf_type::ctrltext)) != std::string::npos) {
-        auto [ucidx, page] = get_column_and_page(sec->get_name());
-        uc_sections[ucidx].pages[page].ctrltext = sec.get();
+        auto [col, page] = get_column_and_page(sec->get_name());
+        col_secsx[col].pages[page].ctrltext = sec.get();
       }
       else if (name.find(patcher::to_string(patcher::buf_type::ctrldata)) != std::string::npos) {
-        auto [ucidx, page] = get_column_and_page(sec->get_name());
-        uc_sections[ucidx].pages[page].ctrldata = sec.get();
+        auto [col, page] = get_column_and_page(sec->get_name());
+        col_secs[col].pages[page].ctrldata = sec.get();
       }
     }
 
-    // Create uC control code from the collected data.  If page
-    // requirement, then pad to page size for page of a column so that
-    // embedded processor can load a page at a time.  Note, that not
-    // all column uC need be used, so account for holes in
-    // uc_sections.  Leverage that uc_sections is a std::map and that
-    // std::map stores its elements in ascending order of keys (this
-    // is asserted)
-    static_assert(std::is_same_v<decltype(uc_sections), std::map<uc_index, elf_sections>>, "fix std::map assumption");
-    m_ctrlcodes.resize(uc_sections.empty() ? 0 : uc_sections.rbegin()->first + 1);
-    pad_offsets.resize(m_ctrlcodes.size());
-    for (auto& [ucidx, elf_sects] : uc_sections) {
-      for (auto& [page, page_sec] : elf_sects.pages) {
+    // Create column control code from the collected data
+    // If page requirement, then pad to page size for page
+    // of a column so that embedded processor can load a page
+    // at a time.
+    std::vector<ctrlcode> ctrlcodes;
+    ctrlcodes.resize(col_secs.size());
+    pad_offsets.resize(col_secs.size());
+    for (auto& [col, col_sec] : col_secs) {
+      for (auto& [page, page_sec] : col_sec.pages) {
         if (page_sec.ctrltext)
-          m_ctrlcodes[ucidx].append_section_data(page_sec.ctrltext);
+          m_ctrlcodes[col].append_section_data(page_sec.ctrltext);
 
         if (page_sec.ctrldata)
-          m_ctrlcodes[ucidx].append_section_data(page_sec.ctrldata);
+          m_ctrlcodes[col].append_section_data(page_sec.ctrldata);
 
-        m_ctrlcodes[ucidx].pad_to_page(page);
+        m_ctrlcodes[col].pad_to_page(page);
       }
-      pad_offsets[ucidx] = m_ctrlcodes[ucidx].size();
+      pad_offsets[col] = m_ctrlcodes[col].size();
     }
 
     // Append pad section to the control code.
@@ -1292,8 +1286,8 @@ class module_elf_aie2ps : public module_elf
       auto name = sec->get_name();
       if (name.find(patcher::to_string(patcher::buf_type::pad)) == std::string::npos)
         continue;
-      auto ucidx = get_col_idx(name);
-      m_ctrlcodes[ucidx].append_section_data(sec.get());
+      auto col = get_col_idx(name);
+      m_ctrlcodes[col].append_section_data(sec.get());
     }
   }
 
@@ -1358,7 +1352,7 @@ class module_elf_aie2ps : public module_elf
           // Get control code section referenced by the symbol, col, and page
           auto [col, page] = get_column_and_page(patch_sec_name);
           auto column_ctrlcode_size = ctrlcodes.at(col).size();
-          auto sec_offset = page * elf_page_size + rela->r_offset + 16; // NOLINT magic number 16??
+          auto sec_offset = page * column_page_size + rela->r_offset + 16; // NOLINT magic number 16??
           if (sec_offset >= column_ctrlcode_size)
             throw std::runtime_error("Invalid ctrlcode offset " + std::to_string(sec_offset));
           // The control code for all columns will be represented as one
@@ -1443,12 +1437,12 @@ class module_sram : public module_impl
   // value : xrt::bo filled with corresponding section data
   std::map<std::string, xrt::bo> m_ctrlpkt_pm_bos;
 
-  // Tuple of uC index, address, size, where address is the address of
-  // the ctrlcode for indexed uC and size is the size of the ctrlcode.
-  // The first ctrlcode is at the base address (m_buffer.address()) of
-  // the buffer object.  The addresses are used in ert_dpu_data
-  // payload to identify the ctrlcode for each column processor.
-  std::vector<std::tuple<uint16_t, uint64_t, uint64_t>> m_column_bo_address;
+  // Column bo address is the address of the ctrlcode for each column
+  // in the (sram) buffer object.  The first ctrlcode is at the base
+  // address (m_buffer.address()) of the buffer object.  The addresses
+  // are used in ert_dpu_data payload to identify the ctrlcode for
+  // each column.
+  std::vector<std::pair<uint64_t, uint64_t>> m_column_bo_address;
 
   uint32_t m_instr_sec_idx;
   uint32_t m_ctrlpkt_sec_idx;
@@ -1469,7 +1463,7 @@ class module_sram : public module_impl
       uint32_t reserved : 29;
     } debug_flags;
     uint32_t all;
-  } m_debug_mode = {};
+  }m_debug_mode = {};
   uint32_t m_id {0}; //TODO: it needs come from the elf file
 
   bool
@@ -1493,20 +1487,13 @@ class module_sram : public module_impl
 
   // For separated multi-column control code, compute the ctrlcode
   // buffer object address of each column (used in ert_dpu_data).
-  // Note, that ctrlcodes is indexed by microblaze controller index
-  // and may have holes. A hole is skipped prior to populating
-  // m_column_bo_address.
   void
   fill_column_bo_address(const std::vector<ctrlcode>& ctrlcodes)
   {
     m_column_bo_address.clear();
-    uint16_t ucidx = 0;
     auto base_addr = m_buffer.address();
     for (const auto& ctrlcode : ctrlcodes) {
-      if (auto size = ctrlcode.size())
-        m_column_bo_address.push_back({ ucidx, base_addr, size }); // NOLINT
-
-      ++ucidx;
+      m_column_bo_address.push_back({ base_addr, ctrlcode.size() }); // NOLINT
       base_addr += ctrlcode.size();
     }
   }
@@ -1515,7 +1502,7 @@ class module_sram : public module_impl
   fill_bo_addresses()
   {
     m_column_bo_address.clear();
-    m_column_bo_address.push_back({ static_cast<uint16_t>(0), m_instr_bo.address(), m_instr_bo.size() }); // NOLINT
+    m_column_bo_address.push_back({ m_instr_bo.address(), m_instr_bo.size() }); // NOLINT
   }
 
   // Fill the instruction buffer object with the data for each
@@ -1868,16 +1855,15 @@ class module_sram : public module_impl
   uint32_t*
   fill_ert_aie2ps(uint32_t *payload) const
   {
-    auto ert_dpu_data_count = static_cast<uint16_t>(m_column_bo_address.size());
+    auto ert_dpu_data_count = static_cast<uint32_t>(m_column_bo_address.size());
     // For multiple instruction buffers, the ert_dpu_data::chained has
     // the number of words remaining in the payload after the current
     // instruction buffer. The ert_dpu_data::chained of the last buffer
     // is zero.
-    for (auto [ucidx, addr, size] : m_column_bo_address) {
+    for (auto [addr, size] : m_column_bo_address) {
       auto dpu = reinterpret_cast<ert_dpu_data*>(payload);
       dpu->instruction_buffer = addr;
       dpu->instruction_buffer_size = static_cast<uint32_t>(size);
-      dpu->uc_index = ucidx;
       dpu->chained = --ert_dpu_data_count;
       payload += sizeof(ert_dpu_data) / sizeof(uint32_t);
     }
@@ -1936,10 +1922,10 @@ public:
     }
   }
 
-  xrt::bo&
-  get_scratch_pad_mem() override
+  [[nodiscard]] xrt::bo&
+      get_scratch_pad_mem() override
   {
-    return m_scratch_pad_mem;
+      return m_scratch_pad_mem;
   }
 
   void
