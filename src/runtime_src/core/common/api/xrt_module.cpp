@@ -61,9 +61,10 @@ namespace
 // 0 if no padding is required.   The page size should be
 // embedded as ELF metadata in the future.
 static constexpr size_t elf_page_size = AIE_COLUMN_PAGE_SIZE;
-static constexpr uint8_t Elf_Amd_Aie2p        = 69;
-static constexpr uint8_t Elf_Amd_Aie2ps       = 64;
-static constexpr uint8_t Elf_Amd_Aie2p_config = 70;
+static constexpr uint8_t Elf_Amd_Aie2p         = 69;
+static constexpr uint8_t Elf_Amd_Aie2ps        = 64;
+static constexpr uint8_t Elf_Amd_Aie2p_config  = 70;
+static constexpr uint8_t Elf_Amd_Aie2ps_config = 71;
 
 // In aie2p max bd data words is 8 and in aie4/aie2ps its 9
 // using max bd words as 9 to cover all cases
@@ -1278,28 +1279,59 @@ public:
 class module_elf_aie2ps : public module_elf
 {
   xrt::aie::program m_program;
-  std::vector<ctrlcode> m_ctrlcodes;
+  std::map<std::string, std::pair<uint32_t, std::vector<ctrlcode>>> m_ctrlcodes_map;
   buf m_dump_buf; // buffer to hold .dump section used for debug/trace
 
-  // The ELF sections embed column and page information in their
-  // names.  Extract the column and page information from the
-  // section name, default to single column and page when nothing
+  // The ELF sections embed instance id, column and page information
+  // in their names.  Extract the id, column and page information from
+  // the section name, default to single column and page when nothing
   // is specified.  Note that in some usecases the extracted column
   // is actually the index of column microblase controller; the term
   // column and uC index is used interchangably in such cases.
-  static std::pair<uint32_t, uint32_t>
-  get_column_and_page(const std::string& name)
+  struct elf_info {
+    std::string id;
+    uint32_t col;
+    uint32_t page;
+  };
+  
+  static elf_info
+  get_id_column_page_info(const std::string& name)
   {
-    constexpr size_t first_dot = 9;  // .ctrltext.<col>.<page>
-    auto dot1 = name.find_first_of(".", first_dot);
-    auto dot2 = name.find_first_of(".", first_dot + 1);
-    auto col = dot1 != std::string::npos
-      ? std::stoi(name.substr(dot1 + 1, dot2))
-      : 0;
-    auto page = dot2 != std::string::npos
-      ? std::stoi(name.substr(dot2 + 1))
-      : 0;
-    return { col, page };
+    // default values
+    std::string id = "";
+    uint32_t col = 0;
+    uint32_t page = 0;
+
+    // Traditional aie2ps Elfs section name format - .ctrltext.<col>.<page>
+    // New aie2ps Elfs section name format - .ctrltext.<id>.<col>.<page>
+    constexpr size_t prefix_len = 10;  // .ctrltext.* or .ctrldata.*
+
+    if (name.size() < (prefix_len - 1))
+      throw std::runtime_error("Invalid section name passed\n");
+    else if (name.size() == (prefix_len - 1))
+      return { id, col, page }; // .ctrltext or .ctrldata
+
+    try {
+      auto dot3 = name.find(".", prefix_len);
+      auto dot4 = name.find(".", dot3 + 1);
+
+      if (dot4 != std::string::npos) {
+        // Format: .ctrltext.<id>.<col>.<page>
+        id = name.substr(prefix_len, dot3 - prefix_len);
+        col = static_cast<uint32_t>(std::stoul(name.substr(dot3 + 1, dot4 - dot3 - 1)));
+        page = static_cast<uint32_t>(std::stoul(name.substr(dot4 + 1)));
+      }
+      else {
+        // Format: .ctrltext.<col>.<page>
+        col = static_cast<uint32_t>(std::stoul(name.substr(prefix_len, dot3 - prefix_len)));
+        page = static_cast<uint32_t>(std::stoul(name.substr(dot3 + 1)));
+      }
+    }
+    catch (const std::exception& e) {
+      throw std::runtime_error(std::string{"Error parsing info from section name: "} + e.what());
+    }
+
+    return { id, col, page };
   }
 
   // Extract control code from ELF sections without assuming anything
@@ -1308,42 +1340,38 @@ class module_elf_aie2ps : public module_elf
   // microblaze controller (uC), then create ctrlcode objects from the
   // data.
   void
-  initialize_column_ctrlcode(std::vector<size_t>& pad_offsets)
+  initialize_ctrlcodes(std::map<std::string, std::vector<size_t>>& pad_offsets)
   {
-    // Elf sections for a single page
+    // Structure represnting a single page
     struct elf_page
     {
       ELFIO::section* ctrltext = nullptr;
       ELFIO::section* ctrldata = nullptr;
     };
 
-    // Elf sections for a single column, the column control code is
-    // divided into pages of some architecture defined size.
-    struct elf_sections
-    {
-      using page_index = uint32_t;
-      std::map<page_index, elf_page> pages;
-    };
-
-    // Elf ctrl code for a partition spanning multiple uC, where each
-    // uC has its own control code.  For architectures where a
-    // partition is not divided into multiple controllers, there will
-    // be just one entry in the associative map.
+    // column control code is divided into pages of some architecture defined size.
+    // A partition can have multiple uC and each uC has multiple Elf pages
     // ucidx -> [page -> [ctrltext, ctrldata]]
+    using page_index = uint32_t;
     using uc_index = uint32_t;
-    std::map<uc_index, elf_sections> uc_sections;
+    using uc_sections = std::map<uc_index, std::map<page_index, elf_page>>;
 
-    // Iterate sections in elf, collect ctrltext and ctrldata
-    // per column and page
+    // Elf can have multiple kernel instances
+    // Each instance has its own uc_sections map
+    // key - instance id : value - uc sections
+    using ctrlcode_map = std::map<std::string, uc_sections>;
+    ctrlcode_map ctrl_map;
+
+    // Iterate sections in elf, collect ctrltext and ctrldata of each instance
     for (const auto& sec : m_elfio.sections) {
       auto name = sec->get_name();
       if (name.find(patcher::to_string(xrt_core::patcher::buf_type::ctrltext)) != std::string::npos) {
-        auto [ucidx, page] = get_column_and_page(sec->get_name());
-        uc_sections[ucidx].pages[page].ctrltext = sec.get();
+        auto [id, ucidx, page] = get_id_column_page_info(sec->get_name());
+        ctrl_map[id][ucidx][page].ctrltext = sec.get();
       }
       else if (name.find(patcher::to_string(xrt_core::patcher::buf_type::ctrldata)) != std::string::npos) {
-        auto [ucidx, page] = get_column_and_page(sec->get_name());
-        uc_sections[ucidx].pages[page].ctrldata = sec.get();
+        auto [id, ucidx, page] = get_id_column_page_info(sec->get_name());
+        ctrl_map[id][ucidx][page].ctrldata = sec.get();
       }
     }
 
@@ -1355,19 +1383,22 @@ class module_elf_aie2ps : public module_elf
     // std::map stores its elements in ascending order of keys (this
     // is asserted)
     static_assert(std::is_same_v<decltype(uc_sections), std::map<uc_index, elf_sections>>, "fix std::map assumption");
-    m_ctrlcodes.resize(uc_sections.empty() ? 0 : uc_sections.rbegin()->first + 1);
-    pad_offsets.resize(m_ctrlcodes.size());
-    for (auto& [ucidx, elf_sects] : uc_sections) {
-      for (auto& [page, page_sec] : elf_sects.pages) {
-        if (page_sec.ctrltext)
-          m_ctrlcodes[ucidx].append_section_data(page_sec.ctrltext);
+    for (auto& [id, uc_sec] : ctrl_map) {
+      auto size = uc_sec.empty() ? 0 : uc_sec.rbegin()->first + 1;
+      m_ctrlcodes_map[id].second.resize(size);
+      pad_offsets[id].resize(size);
+      for (auto& [ucidx, elf_sects] : uc_sec) {
+        for (auto& [page, page_sec] : elf_sects) {
+          if (page_sec.ctrltext)
+            m_ctrlcodes_map[id].second[ucidx].append_section_data(page_sec.ctrltext);
 
-        if (page_sec.ctrldata)
-          m_ctrlcodes[ucidx].append_section_data(page_sec.ctrldata);
+          if (page_sec.ctrldata)
+            m_ctrlcodes_map[id].second[ucidx].append_section_data(page_sec.ctrldata);
 
-        m_ctrlcodes[ucidx].pad_to_page(page);
+          m_ctrlcodes_map[id].second[ucidx].pad_to_page(page);
+        }
+        pad_offsets[id][ucidx] = m_ctrlcodes_map[id].second[ucidx].size();
       }
-      pad_offsets[ucidx] = m_ctrlcodes[ucidx].size();
     }
 
     // Append pad section to the control code.
@@ -1376,11 +1407,13 @@ class module_elf_aie2ps : public module_elf
       auto name = sec->get_name();
       if (name.find(patcher::to_string(xrt_core::patcher::buf_type::pad)) == std::string::npos)
         continue;
-      auto ucidx = get_col_idx(name);
-      m_ctrlcodes[ucidx].append_section_data(sec.get());
+
+      auto info = get_id_column_page_info(name);
+      m_ctrlcodes_map[info.first].second[info.second].append_section_data(sec.get());
     }
   }
 
+#if 0
   // This function returns the column number for which this arg belongs to
   static int
   get_col_idx(const std::string& name)
@@ -1392,9 +1425,10 @@ class module_elf_aie2ps : public module_elf
       throw std::runtime_error("incorrect section name found when parsing ctrlpkt");
     return std::stoi(match.str());
   }
+#endif
 
   void
-  initialize_arg_patchers(const std::vector<ctrlcode>& ctrlcodes, const std::vector<size_t>& pad_offsets)
+  initialize_arg_patchers(const std::map<std::string, std::vector<size_t>>& pad_offsets)
   {
     auto dynsym = m_elfio.sections[".dynsym"];
     auto dynstr = m_elfio.sections[".dynstr"];
@@ -1431,9 +1465,9 @@ class module_elf_aie2ps : public module_elf
         size_t abs_offset = 0;
         xrt_core::patcher::buf_type buf_type = xrt_core::patcher::buf_type::buf_type_count;
         if (patch_sec_name.find(patcher::to_string(xrt_core::patcher::buf_type::pad)) != std::string::npos) {
-          auto col = get_col_idx(patch_sec_name);
-          for (int i = 0; i < col; ++i)
-            abs_offset += ctrlcodes.at(i).size();
+          auto info = get_id_column_page_info(patch_sec_name);
+          for (int i = 0; i < info.col; ++i)
+            abs_offset += m_ctrlcodes_map[info.id]   .at(i).size();
           abs_offset += pad_offsets.at(col);
           abs_offset += rela->r_offset;
           buf_type = xrt_core::patcher::buf_type::pad;
@@ -1441,7 +1475,7 @@ class module_elf_aie2ps : public module_elf
         else {
           // section to patch is ctrlcode
           // Get control code section referenced by the symbol, col, and page
-          auto [col, page] = get_column_and_page(patch_sec_name);
+          auto [id, col, page] = get_id_column_page_info(patch_sec_name);
           auto column_ctrlcode_size = ctrlcodes.at(col).size();
           auto sec_offset = page * elf_page_size + rela->r_offset + 16; // NOLINT magic number 16??
           if (sec_offset >= column_ctrlcode_size)
@@ -1510,9 +1544,9 @@ public:
     : module_elf{elf}
     , m_program{elf}
   {
-    std::vector<size_t> pad_offsets;
-    initialize_column_ctrlcode(pad_offsets);
-    initialize_arg_patchers(m_ctrlcodes, pad_offsets);
+    std::map<std::string, std::vector<size_t>> pad_offsets;
+    initialize_ctrlcodes(pad_offsets);
+    initialize_arg_patchers(pad_offsets);
     initialize_dump_buf(m_dump_buf);
   }
 
