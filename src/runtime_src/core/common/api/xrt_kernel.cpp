@@ -1517,9 +1517,21 @@ private:
   {
     // kernel name will be of format - <kernel_name>:<ctrl code index>
     if (auto i = name.find(":"); i != std::string::npos)
-      return name.substr(i + 1);
+      return name.substr(0, i) + name.substr(i + 1);
 
     return ""; // default case
+  }
+
+  xrt_core::module_int::kernel_info
+  get_kernel_info()
+  {
+    auto kernels_info = xrt_core::module_int::get_kernels_info(m_module);
+    for (auto& kinfo : kernels_info) {
+      if (kinfo.props.name == name)
+        return kinfo;
+    }
+
+    throw std::runtime_error(std::string{"Unable to get kernel info of : "} + name);
   }
 
   static uint32_t
@@ -1603,14 +1615,14 @@ public:
     , hwctx(std::move(ctx))                                             // hw context
     , hwqueue(hwctx)                                                    // hw queue
     , m_module(xrt_core::hw_context_int::get_module(hwctx, nm.substr(0, nm.find(":"))))
-    , properties(xrt_core::module_int::get_kernel_info(m_module).props) // kernel info present in Elf
+    , properties(get_kernel_info().props)
     , uid(create_uid())
     , m_ctrl_code_id(get_ctrlcode_id(nm))                               // control code index
   {
     XRT_DEBUGF("kernel_impl::kernel_impl(%d)\n", uid);
 
     // get kernel info from module and initialize kernel args
-    for (auto& arg : xrt_core::module_int::get_kernel_info(m_module).args)
+    for (auto& arg : get_kernel_info().args)
       args.emplace_back(arg);
 
     // amend args with computed data based on kernel protocol
