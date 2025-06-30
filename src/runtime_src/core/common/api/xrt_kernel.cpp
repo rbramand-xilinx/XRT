@@ -1298,27 +1298,28 @@ public:
   using ctxmgr_type = xrt_core::context_mgr::device_context_mgr;
 
 private:
-  std::string name;                    // kernel name
-  std::shared_ptr<device_type> device; // shared ownership
-  std::shared_ptr<ctxmgr_type> ctxmgr; // device context mgr ownership
-  xrt::hw_context hwctx;               // context for hw resources if any (can be null)
-  xrt_core::hw_queue hwqueue;          // hwqueue for command submission (shared by all runs)
-  xrt::module m_module;                // module with instructions for function
-  xrt::xclbin xclbin;                  // xclbin with this kernel
-  xrt::xclbin::kernel xkernel;         // kernel xclbin metadata
-  std::vector<argument> args;          // kernel args sorted by argument index
-  std::vector<ipctx> ipctxs;           // CU context locks
-  const property_type& properties;     // Kernel properties from XML meta
-  std::bitset<max_cus> cumask;         // cumask for command execution
-  size_t regmap_size = 0;              // CU register map size
-  size_t fa_num_inputs = 0;            // Fast adapter number of inputs per meta data
-  size_t fa_num_outputs = 0;           // Fast adapter number of outputs per meta data
-  size_t fa_input_entry_bytes = 0;     // Fast adapter input desc bytes
-  size_t fa_output_entry_bytes = 0;    // Fast adapter output desc bytes
-  size_t num_cumasks = 1;              // Required number of command cu masks
-  control_type protocol = control_type::none; // Default opcode
-  uint32_t uid;                        // Internal unique id for debug
-  uint32_t m_ctrl_code_index = 0;      // Index to identify which ctrl code to load in elf
+std::string name;                           // kernel name
+std::shared_ptr<device_type> device;        // shared ownership
+std::shared_ptr<ctxmgr_type> ctxmgr;        // device context mgr ownership
+xrt::hw_context hwctx;                      // context for hw resources if any (can be null)
+xrt_core::hw_queue hwqueue;                 // hwqueue for command submission (shared by all runs)
+xrt::module m_module;                       // module with instructions for function
+xrt::xclbin xclbin;                         // xclbin with this kernel
+xrt::xclbin::kernel xkernel;                // kernel xclbin metadata
+std::vector<argument> args;                 // kernel args sorted by argument index
+std::vector<ipctx> ipctxs;                  // CU context locks
+const property_type& properties;            // Kernel properties from XML meta
+std::bitset<max_cus> cumask;                // cumask for command execution
+size_t regmap_size = 0;                     // CU register map size
+size_t fa_num_inputs = 0;                   // Fast adapter number of inputs per meta data
+size_t fa_num_outputs = 0;                  // Fast adapter number of outputs per meta data
+size_t fa_input_entry_bytes = 0;            // Fast adapter input desc bytes
+size_t fa_output_entry_bytes = 0;           // Fast adapter output desc bytes
+size_t num_cumasks = 1;                     // Required number of command cu masks
+control_type protocol = control_type::none; // Default opcode
+uint32_t uid;                               // Internal unique id for debug
+  uint32_t m_ctrl_code_id = xrt_core::module_int::no_ctrl_code_id;
+                                              // ID to identify which ctrl code to load from elf
   std::shared_ptr<xrt_core::usage_metrics::base_logger> m_usage_logger =
       xrt_core::usage_metrics::get_usage_metrics_logger();
 
@@ -1507,14 +1508,16 @@ private:
     return data;  // no skipping
   }
 
-  static uint32_t
-  get_ctrlcode_idx(const std::string& name)
+  const xrt_core::module_int::kernel_info&
+  get_kernel_info()
   {
-    // kernel name will be of format - <kernel_name>:<ctrl code index>
-    if (auto i = name.find(":"); i != std::string::npos)
-      return std::stoul(name.substr(i+1, name.size()-i-1));
+    const auto& kernels_info = xrt_core::module_int::get_kernels_info(m_module);
+    for (const auto& kinfo : kernels_info) {
+      if (kinfo.props.name == name)
+        return kinfo;
+    }
 
-    return 0; // default case
+    throw std::runtime_error(std::string{"Unable to get kernel info of : "} + name);
   }
 
   static uint32_t
@@ -1598,14 +1601,14 @@ public:
     , hwctx(std::move(ctx))                                             // hw context
     , hwqueue(hwctx)                                                    // hw queue
     , m_module(xrt_core::hw_context_int::get_module(hwctx, nm.substr(0, nm.find(":"))))
-    , properties(xrt_core::module_int::get_kernel_info(m_module).props) // kernel info present in Elf
+    , properties(get_kernel_info().props)
     , uid(create_uid())
-    , m_ctrl_code_index(get_ctrlcode_idx(nm))                           // control code index
+    , m_ctrl_code_id(xrt_core::module_int::get_ctrlcode_id(m_module, nm)) // control code index
   {
     XRT_DEBUGF("kernel_impl::kernel_impl(%d)\n", uid);
 
     // get kernel info from module and initialize kernel args
-    for (auto& arg : xrt_core::module_int::get_kernel_info(m_module).args)
+    for (const auto& arg : get_kernel_info().args)
       args.emplace_back(arg);
 
     // amend args with computed data based on kernel protocol
@@ -1676,9 +1679,9 @@ public:
   }
 
   uint32_t
-  get_ctrl_code_index() const
+  get_ctrl_code_id() const
   {
-    return m_ctrl_code_index;
+    return m_ctrl_code_id;
   }
 
   xrt::xclbin
@@ -1981,12 +1984,12 @@ class run_impl
   // the control code that needs to be run.
   // By default control code at zeroth index is picked
   static xrt::module
-  copy_module(const xrt::module& module, const xrt::hw_context& hwctx, uint32_t ctrl_code_idx)
+  copy_module(const xrt::module& module, const xrt::hw_context& hwctx, uint32_t ctrl_code_id)
   {
     if (!module)
       return {};
 
-    return {module, hwctx, ctrl_code_idx};
+    return {module, hwctx, ctrl_code_id};
   }
 
   virtual std::unique_ptr<arg_setter>
@@ -2174,7 +2177,7 @@ public:
   explicit
   run_impl(std::shared_ptr<kernel_impl> k)
     : kernel(std::move(k))
-    , m_module{copy_module(kernel->get_module(), kernel->get_hw_context(), kernel->get_ctrl_code_index())}
+    , m_module{copy_module(kernel->get_module(), kernel->get_hw_context(), kernel->get_ctrl_code_id())}
     , m_hwqueue(kernel->get_hw_queue())
     , ips(kernel->get_ips())
     , cumask(kernel->get_cumask())
