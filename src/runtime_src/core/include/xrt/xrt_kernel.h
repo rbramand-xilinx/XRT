@@ -21,6 +21,7 @@
 # include <chrono>
 # include <condition_variable>
 # include <cstdint>
+# include <cstdio>
 # include <functional>
 # include <memory>
 # include <vector>
@@ -507,7 +508,11 @@ public:
   void
   set_arg(int index, xrt::bo& boh)
   {
+    auto start = std::chrono::high_resolution_clock::now();
     set_arg_at_index(index, boh);
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::printf("[PROFILE] set_arg(xrt::bo&) arg_index=%d time=%lld us\n", index, static_cast<long long>(duration.count()));
   }
 
   /**
@@ -516,7 +521,11 @@ public:
   void
   set_arg(int index, const xrt::bo& boh)
   {
+    auto start = std::chrono::high_resolution_clock::now();
     set_arg_at_index(index, boh);
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::printf("[PROFILE] set_arg(const xrt::bo&) arg_index=%d time=%lld us\n", index, static_cast<long long>(duration.count()));
   }
 
   /**
@@ -525,7 +534,11 @@ public:
   void
   set_arg(int index, xrt::bo&& boh)
   {
+    auto start = std::chrono::high_resolution_clock::now();
     set_arg_at_index(index, boh);
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::printf("[PROFILE] set_arg(xrt::bo&&) arg_index=%d time=%lld us\n", index, static_cast<long long>(duration.count()));
   }
 
   ///@cond
@@ -533,7 +546,7 @@ public:
   XRT_API_EXPORT
   void
   submit_wait(const xrt::fence& fence);
-  
+
   XRT_API_EXPORT
   void
   submit_signal(const xrt::fence& fence);
@@ -645,13 +658,13 @@ public:
 
   /**
    * get_ctrl_scratchpad_bo() - Get the ctrl scratchpad bo object
-   * 
+   *
    * NPU uses ctrl scratchpad memory to store control state data.
    * This memory is created by XRT based on ELF used to create xrt::kernel
    * The API returns the buffer object (bo) created by XRT allowing
    * applications to read from or write to it.
    * This API is only valid for run objects associated with an ELF.
-   * 
+   *
    * Throws if control scratchpad section is not absent in ELF or
    * if any error occurs while retrieving the bo
    */

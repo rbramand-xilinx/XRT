@@ -27,7 +27,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -200,7 +202,7 @@ private:
     *data_to_patch = static_cast<uint32_t>(addr & 0xffffffff);
     *(data_to_patch + 1) = static_cast<uint32_t>((addr >> 32) & 0xffffffff);
   }
-  
+
   // Replace certain bits of *data_to_patch with register_value. Which bits to be replaced is specified by mask
   // For     *data_to_patch be 0xbb11aaaa and mask be 0x00ff0000
   // To make *data_to_patch be 0xbb55aaaa, register_value must be 0x00550000
@@ -319,9 +321,18 @@ private:
 
       // lambda for calling sync bo if template arg is of type xrt::bo
       // We only sync the words that are patched not the entire bo
+      static long long max_sync_time_us = 0;
       auto sync = [&](size_t size) {
         if constexpr (std::is_same_v<T, xrt::bo>) {
+          auto start = std::chrono::high_resolution_clock::now();
           base_or_bo.sync(XCL_BO_SYNC_BO_TO_DEVICE, size, offset);
+          auto end = std::chrono::high_resolution_clock::now();
+          auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+          auto time_us = static_cast<long long>(duration.count());
+          if (time_us > max_sync_time_us)
+            max_sync_time_us = time_us;
+          std::printf("[PROFILE] sync(size=%zu, offset=%zu) time=%lld us, max_time=%lld us\n",
+                      size, static_cast<size_t>(offset), time_us, max_sync_time_us);
         }
       };
 
@@ -532,7 +543,7 @@ is_group_elf(const ELFIO::elfio& elfio)
     constexpr uint8_t group_elf_minor_version = 3;
     if ((abi_version & minor_ver_mask) >= group_elf_minor_version)
       return true;
-      
+
     return false;
   }
 }
@@ -993,7 +1004,7 @@ class module_elf : public module_impl
                 xrt_core::patcher::buf_type type, uint32_t grp_index, bool first)
   {
     const auto key_string = generate_key_string(argnm, type);
-    // check if arg patcher exists for this ctrl code 
+    // check if arg patcher exists for this ctrl code
     if (m_arg2patcher.find(grp_index) == m_arg2patcher.end())
       return false; // no patch entries for given grp idx
 
@@ -1203,7 +1214,7 @@ class module_elf_aie2p : public module_elf
   std::map<uint32_t, std::unordered_set<std::string>> m_ctrl_pdi_map;
   // map storing xrt::bo that stores pdi data corresponding to each pdi symbol
   std::map<std::string, xrt::bo> m_pdi_bo_map;
-  
+
   size_t m_scratch_pad_mem_size = 0;
   size_t m_ctrl_scratch_pad_mem_size = 0;
   uint32_t m_partition_size = UINT32_MAX;
@@ -1238,7 +1249,7 @@ class module_elf_aie2p : public module_elf
       auto name = sec->get_name();
       if (name.find(patcher::to_string(xrt_core::patcher::buf_type::pdi)) == std::string::npos)
         continue;
-      
+
       buf pdi_buf;
       pdi_buf.append_section_data(sec.get());
       m_pdi_buf_map.emplace(name, pdi_buf);
@@ -1569,7 +1580,7 @@ public:
         if ((m_instr_buf_map.find(id) == m_instr_buf_map.end()) &&
             (m_ctrl_packet_map.find(id) == m_ctrl_packet_map.end()))
           throw std::runtime_error(std::string{"Unable to find ctrlcode entry for given kernel: "} + name);
-    
+
         return id;
       }
       else
@@ -1697,7 +1708,7 @@ class module_elf_aie2ps : public module_elf
 
           if (page_sec.ctrldata)
             m_ctrlcodes_map[id][ucidx].append_section_data(page_sec.ctrldata);
-    
+
           m_ctrlcodes_map[id][ucidx].pad_to_page(page);
         }
         pad_offsets[id][ucidx] = m_ctrlcodes_map[id][ucidx].size();
@@ -1907,7 +1918,7 @@ public:
         auto id = it->second;
         if (m_ctrlcodes_map.find(id) == m_ctrlcodes_map.end())
           throw std::runtime_error(std::string{"Unable to find ctrlcode entry for given kernel: "} + name);
-    
+
         return id;
       }
       else
@@ -2685,7 +2696,7 @@ public:
   {
     if (size > 8) // NOLINT
       throw std::runtime_error{ "patch_value() only supports 64-bit values or less" };
-    
+
     auto arg_value = *static_cast<const uint64_t*>(value);
     patch_value(argnm, index, arg_value);
   }
@@ -2729,7 +2740,7 @@ public:
   {
     if (!m_ctrl_scratch_pad_mem)
       throw std::runtime_error("Control scratchpad memory is not present\n");
-  
+
     // sync bo data before returning
     m_ctrl_scratch_pad_mem.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
     return m_ctrl_scratch_pad_mem;
