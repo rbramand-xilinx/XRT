@@ -79,7 +79,7 @@ dump_uc_log_buffer(const xrt::hw_context& hwctx);
 // This is used by XDP to get the ELF files registered with
 // the hardware context.
 XRT_CORE_COMMON_EXPORT
-const std::map<std::string, xrt::elf>&
+std::map<std::string, xrt::elf>
 get_elf_map(const xrt::hw_context& hwctx);
 
 }} // hw_context_int, xrt_core
