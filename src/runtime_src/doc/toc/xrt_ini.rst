@@ -48,7 +48,7 @@ The following is a simple example that turns on profile timeline trace and sends
    timeline_trace = true
 
 
-**API Support**: From 2020.2 release the runtime configuration options can also be provided through Native XRT APIs. 
+**API Support**: From 2020.2 release the runtime configuration options can also be provided through Native XRT APIs.
 
 
     - ``xrt::ini::set``
@@ -59,6 +59,59 @@ Example
 
     xrt::ini::set("Runtime.runtime_log", "console");
     xrt::ini::set("Runtime.verbosity", 5);
+
+
+Runtime Log Sinks (``runtime_log``)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ``runtime_log`` key controls where XRT message output is sent. The following values are supported:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 15 65
+
+   * - Value
+     - Platform
+     - Description
+   * - ``null`` or empty
+     - All
+     - Discard all messages (default - silent mode)
+   * - ``console``
+     - All
+     - Write messages to ``stderr``
+   * - ``syslog``
+     - All
+     - Routes to the OS-level centralized log on each platform:
+       Linux uses the POSIX syslog (``/var/log/syslog`` or ``journalctl``);
+       Windows uses the Windows Application Event Log under source ``AMD_XRT``.
+       Using ``syslog`` in ``xrt.ini`` works on both platforms without change.
+
+       On Windows, messages can be filtered in Event Viewer
+       (**Windows Logs → Application → Filter Current Log → Source: AMD_XRT**)
+       or from the command line:
+
+       .. code-block:: powershell
+
+          # PowerShell - list all XRT events
+          Get-EventLog -LogName Application -Source "AMD_XRT"
+
+       .. code-block:: bat
+
+          :: Command prompt - filter by severity using Event ID
+          :: Error=1003, Warning=1004, Info=1006, Debug=1007
+          wevtutil qe Application /q:"*[System[Provider[@Name='AMD_XRT'] and EventID=1003]]" /f:text
+
+   * - ``<filename>``
+     - All
+     - Write messages to the specified file path (e.g., ``runtime_log = xrt_run.log``)
+
+Example — redirect XRT logs to the OS system log on both Linux and Windows:
+
+.. code-block:: ini
+
+   [Runtime]
+   runtime_log = syslog
+   verbosity = 7
 
 
 For a complete list of currently supported xrt.ini keys, default value, and valid key values please refer `Vitis Application Acceleration Development Flow Documentation <https://docs.amd.com/r/en-US/ug1702-vitis-accelerated-reference/xrt.ini-File>`_

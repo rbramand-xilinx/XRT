@@ -26,6 +26,8 @@
 #endif
 #ifdef _WIN32
 # include <winsock.h>
+// Windows Event Log API - required for winlog_dispatch
+# include <windows.h>
 #endif
 
 namespace {
@@ -95,8 +97,113 @@ private:
   };
 };
 
-//--
-#ifndef _WIN32
+// syslog_dispatch: routes to the OS-level centralized log on each platform.
+// Linux   -> POSIX syslog (/var/log/syslog or journalctl -t sdaccel)
+//
+// Windows -> Windows Application Event Log under source "AMD_XRT"
+// Filter in Event Viewer:
+//   Windows Logs -> Application -> Source: AMD_XRT
+// Filter via PowerShell:
+//   Get-EventLog -LogName Application -Source "AMD_XRT"
+// Filter via cmd:
+//   wevtutil qe Application /q:"*[System[Provider[@Name='AMD_XRT']]]" /f:text
+#ifdef _WIN32
+class syslog_dispatch : public message_dispatch
+{
+public:
+  syslog_dispatch()
+  {
+    // Register "AMD_XRT" as the event source name.
+    // This name appears in the "Source" column in Event Viewer
+    // and is used for filtering.
+    m_handle = RegisterEventSourceA(nullptr, "AMD_XRT");
+    if (!m_handle)
+      throw std::runtime_error("Failed to register Windows event source 'AMD_XRT'");
+  }
+
+  virtual ~syslog_dispatch()
+  {
+    if (m_handle)
+      DeregisterEventSource(m_handle);
+  }
+
+  virtual void
+  send(severity_level l, const char* tag, const char* msg) override
+  {
+    if (!m_handle)
+      return;
+    // Combine tag and message so Event Viewer shows "[xrt_elf] : some message"
+    std::string full_msg = std::string("[") + tag + "] : " + msg;
+    LPCSTR strings[] = {full_msg.c_str()};
+    // ReportEventA parameters:
+    //   hEventLog   - handle from RegisterEventSourceA
+    //   wType       - EVENTLOG_ERROR_TYPE / WARNING / INFORMATION
+    //                 (sets icon in Event Viewer)
+    //   wCategory   - 0 (no category)
+    //   dwEventID   - user-defined numeric ID, allows filtering by
+    //                 severity without parsing message text
+    //                 (e.g. EventID=1003 for errors only)
+    //   lpUserSid   - nullptr (no user security identifier)
+    //   wNumStrings - 1 (one string in the strings array)
+    //   dwDataSize  - 0 (no binary data)
+    //   lpStrings   - array of message strings
+    //   lpRawData   - nullptr (no binary data)
+    ReportEventA(m_handle, to_event_type(l), 0, to_event_id(l),
+                 nullptr, 1, 0, strings, nullptr);
+  }
+
+private:
+  HANDLE m_handle = nullptr;
+
+  // Maps XRT severity to Windows event type (controls icon in Event Viewer):
+  //   EVENTLOG_ERROR_TYPE       -> red X
+  //   EVENTLOG_WARNING_TYPE     -> yellow triangle
+  //   EVENTLOG_INFORMATION_TYPE -> blue i
+  static WORD
+  to_event_type(severity_level l)
+  {
+    switch (l) {
+    case severity_level::emergency:
+    case severity_level::alert:
+    case severity_level::critical:
+    case severity_level::error:
+      return EVENTLOG_ERROR_TYPE;
+    case severity_level::warning:
+      return EVENTLOG_WARNING_TYPE;
+    default:
+      return EVENTLOG_INFORMATION_TYPE;
+    }
+  }
+
+  // Maps XRT severity to a user-defined event ID for fine-grained filtering.
+  // Example:
+  // wevtutil qe Application /q:"*[System[Provider[@Name='AMD_XRT'] and EventID=1003]]"
+  static DWORD
+  to_event_id(severity_level l)
+  {
+    switch (l) {
+    case severity_level::emergency:
+      return 1000;
+    case severity_level::alert:
+      return 1001;
+    case severity_level::critical:
+      return 1002;
+    case severity_level::error:
+      return 1003;
+    case severity_level::warning:
+      return 1004;
+    case severity_level::notice:
+      return 1005;
+    case severity_level::info:
+      return 1006;
+    case severity_level::debug:
+      return 1007;
+    default:
+      return 1000;
+    }
+  }
+};
+#else
 class syslog_dispatch : public message_dispatch
 {
 public:
@@ -106,10 +213,12 @@ public:
   virtual ~syslog_dispatch()
   { closelog(); }
 
-  virtual void send(severity_level l, const char* tag, const char* msg) override
+  virtual void
+  send(severity_level l, const char* tag, const char* msg) override
   { syslog(severityMap[l], "%s", msg); }
 
 private:
+  // Maps XRT severity to POSIX syslog priority
   std::map<severity_level, int> severityMap = {
     { severity_level::emergency, LOG_EMERG},
     { severity_level::alert,     LOG_ALERT},
@@ -154,13 +263,8 @@ make_dispatcher(const std::string& choice)
     return new null_dispatch;
   else if(choice == "console")
     return new console_dispatch;
-  else if(choice == "syslog") {
-#ifndef _WIN32
+  else if(choice == "syslog")
     return new syslog_dispatch;
-#else
-    throw std::runtime_error("syslog not supported on windows");
-#endif
-  }
   else {
     if(choice.front() == '"') {
       std::string file = choice;
