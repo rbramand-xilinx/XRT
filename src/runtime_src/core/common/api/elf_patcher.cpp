@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
+#include <iostream>
 
 namespace xrt_core::elf_patcher {
 
@@ -198,10 +199,25 @@ patch_symbol(xrt::bo bo, uint64_t value, bool first, bool is_arg)
       bo.sync(XCL_BO_SYNC_BO_TO_DEVICE, size, offset);
     };
 
+    // DEBUG: print abs_offset and sym_type for every patch location
+    auto dbg_dump = [&](const char* tag, int nwords) {
+      std::cerr << std::hex << "[PATCH_DBG] " << tag
+                << " abs_offset=0x" << offset
+                << " sym_type=" << std::dec << static_cast<int>(m_config->m_symbol_type)
+                << " value=0x" << std::hex << value
+                << " base_bo_addr=0x" << config.offset_to_base_bo_addr
+                << " words:";
+      for (int w = 0; w < nwords; ++w)
+        std::cerr << " [" << std::dec << w << "]=0x" << std::hex << bd_data_ptr[w]; // NOLINT
+      std::cerr << std::dec << "\n";
+    };
+
     switch (m_config->m_symbol_type) {
     case symbol_type::address_64:
       // value is a 64bit address
+      dbg_dump("PRE  address_64", 2);
       patch64(bd_data_ptr, value);
+      dbg_dump("POST address_64", 2);
       if (!first) {
         // sync 64 bits patched
         sync(sizeof(uint64_t));
@@ -210,7 +226,9 @@ patch_symbol(xrt::bo bo, uint64_t value, bool first, bool is_arg)
     case symbol_type::scalar_32bit_kind:
       // value is a register value
       if (config.mask) {
+        dbg_dump("PRE  scalar_32", 1);
         patch32(bd_data_ptr, value, config.mask);
+        dbg_dump("POST scalar_32", 1);
         if (!first) {
           // sync 32 bits patched
           sync(sizeof(uint32_t));
@@ -219,7 +237,9 @@ patch_symbol(xrt::bo bo, uint64_t value, bool first, bool is_arg)
       break;
     case symbol_type::shim_dma_base_addr_symbol_kind:
       // value is a bo address
+      dbg_dump("PRE  patch57", 9);
       patch57(bd_data_ptr, value + config.offset_to_base_bo_addr);
+      dbg_dump("POST patch57", 9);
       if (!first) {
         // sync all the words (max_bd_words)
         sync(sizeof(uint32_t) * max_bd_words);
@@ -227,7 +247,9 @@ patch_symbol(xrt::bo bo, uint64_t value, bool first, bool is_arg)
       break;
     case symbol_type::shim_dma_aie4_base_addr_symbol_kind:
       // value is a bo address
+      dbg_dump("PRE  patch57_aie4", 2);
       patch57_aie4(bd_data_ptr, value + config.offset_to_base_bo_addr);
+      dbg_dump("POST patch57_aie4", 2);
       if (!first) {
         // sync 64 bits or 2 words
         sync(sizeof(uint64_t));
@@ -235,7 +257,9 @@ patch_symbol(xrt::bo bo, uint64_t value, bool first, bool is_arg)
       break;
     case symbol_type::control_packet_57:
       // value is a bo address
+      dbg_dump("PRE  ctrl57", 4);
       patch_ctrl57(bd_data_ptr, value + config.offset_to_base_bo_addr);
+      dbg_dump("POST ctrl57", 4);
       if (!first) {
         // Data in this case is written till 3rd offset of bd_data_ptr
         // so syncing 4 words
@@ -244,7 +268,9 @@ patch_symbol(xrt::bo bo, uint64_t value, bool first, bool is_arg)
       break;
     case symbol_type::control_packet_48:
       // value is a bo address
+      dbg_dump("PRE  ctrl48", 4);
       patch_ctrl48(bd_data_ptr, value + config.offset_to_base_bo_addr);
+      dbg_dump("POST ctrl48", 4);
       if (!first) {
         // Data in this case is written till 3rd offset of bd_data_ptr
         // so syncing 4 words
@@ -253,7 +279,9 @@ patch_symbol(xrt::bo bo, uint64_t value, bool first, bool is_arg)
       break;
     case symbol_type::shim_dma_48:
       // value is a bo address
+      dbg_dump("PRE  shim48", 3);
       patch_shim48(bd_data_ptr, value + config.offset_to_base_bo_addr);
+      dbg_dump("POST shim48", 3);
       if (!first) {
         // syncing 3 words
         sync(3 * sizeof(uint32_t));    // NOLINT
@@ -261,7 +289,9 @@ patch_symbol(xrt::bo bo, uint64_t value, bool first, bool is_arg)
       break;
     case symbol_type::control_packet_57_aie4:
       // value is a bo address
+      dbg_dump("PRE  ctrl57_aie4", 3);
       patch_ctrl57_aie4(bd_data_ptr, value + config.offset_to_base_bo_addr);
+      dbg_dump("POST ctrl57_aie4", 3);
       if (!first) {
         // syncing 3 words
         sync(3 * sizeof(uint32_t));    // NOLINT
